@@ -1,0 +1,38 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+*.swp
+*.bak
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Poetry specific files
+poetry.lock  # Generally, keep this for reproducible builds, but sometimes ignored.
+.poetry/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test/Coverage files
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Logs
+*.log

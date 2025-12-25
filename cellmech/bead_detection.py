@@ -1,29 +1,34 @@
 import numpy as np
 from scipy.ndimage import shift as ndimage_shift, map_coordinates
-from scipy.optimize import minimize
+from scipy.ndimage import maximum_filter
 import matplotlib.pyplot as plt
 from typing import Tuple, List
+from PIL import Image
+from cellmech.utils import symmetric_gaussian
+from cellmech.fttc import detect_shapes
 
-def generate_mock_bead_image(size: int, num_beads: int, noise_level: float = 0.05, dx: float = 0.0, dy: float = 0.0) -> np.ndarray:
-    """Generates a mock image with random beads, applying optional uniform displacement."""
-    img = np.zeros((size, size), dtype=np.float64)
-    np.random.seed(42)  # For reproducible bead positions
-    
+def generate_mock_beads_center(num_beads: int, max_range : int):
     # Generate random bead centers and radii
     centers = []
     for _ in range(num_beads):
         # Center coordinates (x, y)
-        r_center = np.random.randint(10, size - 10)
-        c_center = np.random.randint(10, size - 10)
+        r_center = np.random.randint(10, max_range)
+        c_center = np.random.randint(10, max_range)
         centers.append((r_center, c_center))
+    return centers
+    
+def generate_mock_bead_image(size: int, centers: np.ndarray, noise_level: float = 0.05, dUx : np.ndarray = np.zeros((1,1)), dUy: np.ndarray = np.zeros((1,1))) -> np.ndarray:
+    """Generates a mock image with random beads, applying optional uniform displacement."""
+    img = np.zeros((size, size), dtype=np.float64)
+    np.random.seed(42)  # For reproducible bead positions
         
     for r_center, c_center in centers:
         # Define bead parameters (for simple Gaussian-like spots)
         radius = np.random.uniform(2.0, 4.0)
         
         # Apply displacement to center for the deformed image
-        r_current = r_center + dy
-        c_current = c_center + dx
+        r_current = r_center + dUx[r_center, c_center] 
+        c_current = c_center + dUy[r_center, c_center]
         
         # Create a Gaussian spot (approximating a bead)
         for r in range(size):
@@ -89,130 +94,115 @@ def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def
     ssd = np.sum((ref_subset - def_subset_interpolated)**2)
     return ssd
 
-def bead_image_correlation(ref_img: np.ndarray, def_img: np.ndarray, subset_size: int, grid_spacing: int) -> np.ndarray:
+import numpy as np
+from scipy.ndimage import maximum_filter
+
+def bead_image_correlation(image1, image2, N):
     """
-    Performs 2D Digital Image Correlation (DIC) to find the displacement field.
+    Calculates the displacement field using Thin Plate Spline (TPS) interpolation.
+    Maintains the requested signature and internal logic flow.
+    """
     
-    Args:
-        ref_img: The reference (undeformed) image.
-        def_img: The deformed image.
-        subset_size: The side length of the square subset (must be odd).
-        grid_spacing: The distance between centers of adjacent subsets.
+    # 1. Initialize NxN displacement field
+    dUx = np.zeros((N, N))
+    dUy = np.zeros((N, N))
+    
+    # 2. Extract bead positions (finding local maxima)
+    def get_bead_positions(img, threshold_percentile=98):
+        threshold = np.percentile(img, threshold_percentile)
+        data_max = maximum_filter(img, size=5)
+        maxima = (img == data_max) & (img > threshold)
+        return np.argwhere(maxima) # Returns [row, col] -> [y, x]
+
+    beads1 = get_bead_positions(image1)
+    beads2 = get_bead_positions(image2)
+
+    # 3. Map beads and calculate displacement (O(M) correlation)
+    ux_list, uy_list, coords_list = [], [], []
+
+    for b1 in beads1:
+        # Simple Euclidean distance mapping to find the same bead in image2
+        distances = np.linalg.norm(beads2 - b1, axis=1)
+        if len(distances) == 0: continue
         
-    Returns:
-        A NumPy array of shape (N, 3), where N is the number of grid points.
-        Each row is [y_coord, x_coord, u_displacement, v_displacement].
-    """
-    if subset_size % 2 == 0:
-        raise ValueError("Subset size must be odd.")
+        idx = np.argmin(distances)
+        if distances[idx] < 30:  # Search radius threshold
+            b2 = beads2[idx]
+            uy_list.append(b2[0] - b1[0])
+            ux_list.append(b2[1] - b1[1])
+            coords_list.append(b1)
 
-    subset_half = subset_size // 2
-    rows, cols = ref_img.shape
+    # Convert to arrays: P contains [y, x], U contains [uy, ux]
+    P = np.array(coords_list)
+    U = np.vstack([uy_list, ux_list]).T
+    M = P.shape[0]
+
+    if M < 3:
+        raise ValueError("Not enough beads found to calculate a 2D displacement field.")
+
+    # 4. TPS Interpolation Logic (More accurate for few beads)
+    # Radial Basis Function kernel: r^2 * log(r)
+    def rbf(r):
+        mask = r > 0
+        res = np.zeros_like(r)
+        res[mask] = r[mask]**2 * np.log(r[mask])
+        return res
+
+    # Build the linear system L * W = Y
+    # K is (M x M) distance matrix through RBF
+    dist_matrix = np.linalg.norm(P[:, np.newaxis, :] - P[np.newaxis, :, :], axis=2)
+    K = rbf(dist_matrix)
     
-    # Define grid points (centers of subsets)
-    # Start at subset_half and end before rows/cols - subset_half
-    y_centers = np.arange(subset_half, rows - subset_half, grid_spacing)
-    x_centers = np.arange(subset_half, cols - subset_half, grid_spacing)
-
-    # List to store results: (y_center, x_center, u, v)
-    displacement_field = []
+    # Q is (M x 3) matrix containing [1, y, x]
+    Q = np.hstack([np.ones((M, 1)), P])
     
-    print(f"Starting DIC analysis with {len(y_centers) * len(x_centers)} subsets...")
-
-    # Iterate over all grid points
-    for r_center in y_centers:
-        for c_center in x_centers:
-            # 1. Extract the reference subset
-            ref_subset = ref_img[r_center - subset_half : r_center + subset_half + 1,
-                                 c_center - subset_half : c_center + subset_half + 1]
-
-            # 2. Initial Guess for Displacement (u0, v0)
-            # A simple initial guess of (0, 0) is used here. 
-            initial_guess = np.array([0.0, 0.0]) # [u (x-disp), v (y-disp)]
-
-            # Define bounds for the displacement search (+/- 5 pixels) for stability
-            bounds = [(-5.0, 5.0), (-5.0, 5.0)]
-
-            # 3. Sub-pixel Refinement using Optimization (Minimizing SSD)
-            # Use 'COBYLA' as it supports bounds and is derivative-free, improving robustness.
-            ref_center_tuple = (r_center, c_center)
-            
-            res = minimize(
-                ssd_criterion, 
-                initial_guess, 
-                args=(ref_subset, def_img, ref_center_tuple, subset_half), 
-                method='COBYLA', # Changed from 'Powell' to 'COBYLA'
-                bounds=bounds,   # Added bounds for stability
-                tol=1e-3,        # Set tolerance for convergence
-                options={'maxiter': 500} # Increased maxiter for better convergence
-            )
-            
-            if res.success:
-                u, v = res.x
-                # u is x-displacement (col), v is y-displacement (row)
-                displacement_field.append([r_center, c_center, u, v])
-            else:
-                # If optimization fails, append NaN
-                # print(f"Warning: Optimization failed at ({r_center}, {c_center}).")
-                displacement_field.append([r_center, c_center, np.nan, np.nan])
-
-    return np.array(displacement_field)
-
-def plot_displacement_field(displacement_data: np.ndarray, image_size: int, applied_dx: float, applied_dy: float):
-    """
-    Plots the calculated displacement vectors.
-    """
-    # Remove NaN values (failed correlations)
-    valid_data = displacement_data[~np.isnan(displacement_data).any(axis=1)]
+    # Construct the full TPS matrix
+    L = np.block([
+        [K,               Q],
+        [Q.T, np.zeros((3, 3))]
+    ])
     
-    if valid_data.size == 0:
-        print("No valid displacement data to plot.")
-        return
-
-    # Extract coordinates (Y, X) and displacements (U, V)
-    Y, X = valid_data[:, 0], valid_data[:, 1]
-    U, V = valid_data[:, 2], valid_data[:, 3]
-
-    # Calculate magnitude for coloring
-    Magnitude = np.sqrt(U**2 + V**2)
+    # Targeted values (displacements) padded with zeros for the affine part
+    Y_x = np.concatenate([U[:, 1], np.zeros(3)])
+    Y_y = np.concatenate([U[:, 0], np.zeros(3)])
     
-    # Calculate Mean Squared Error (MSE)
-    # The true displacement applied was (applied_dx, applied_dy)
-    error_u = U - applied_dx
-    error_v = V - applied_dy
-    mse = np.mean(error_u**2 + error_v**2)
-    
-    print("-" * 50)
-    print(f"Mean Displacement U: {np.mean(U):.3f}")
-    print(f"Mean Displacement V: {np.mean(V):.3f}")
-    print(f"Applied Displacement: U={applied_dx}, V={applied_dy}")
-    print(f"Mean Squared Error (MSE) in displacement: {mse:.4f} pixels^2")
-    print("-" * 50)
+    # Solve for weights (coefficients)
+    weights_x = np.linalg.solve(L, Y_x)
+    weights_y = np.linalg.solve(L, Y_y)
 
-
-    plt.figure(figsize=(8, 8), facecolor='#f8f8f8')
-    # Quiver plot for the displacement field
-    # The quiver function takes (X, Y, U, V)
-    Q = plt.quiver(X, Y, U, V, 
-                   Magnitude, 
-                   pivot='mid', 
-                   scale=1, 
-                   scale_units='xy', 
-                   angles='xy',
-                   cmap='viridis')
-
-    # Add color bar
-    cbar = plt.colorbar(Q, label='Displacement Magnitude (pixels)')
+    # 5. Compute entire displacement field on NxN grid
+    rows, cols = image1.shape
+    y_grid = np.linspace(0, rows - 1, N)
+    x_grid = np.linspace(0, cols - 1, N)
+    grid_Y, grid_X = np.meshgrid(y_grid, x_grid, indexing='ij')
     
-    plt.title(f'DIC Displacement Field (Applied: $u={applied_dx}, v={applied_dy}$)', fontsize=14)
-    plt.xlabel('X coordinate (pixels)', fontsize=12)
-    plt.ylabel('Y coordinate (pixels)', fontsize=12)
+    # Flatten grid for vectorized computation
+    flat_grid = np.stack([grid_Y.ravel(), grid_X.ravel()], axis=1)
     
-    # Invert Y axis to match image coordinates (row=0 is top)
-    plt.gca().invert_yaxis()
-    plt.xlim(0, image_size)
-    plt.ylim(image_size, 0)
-    plt.axis('equal')
-    plt.grid(alpha=0.2)
-    plt.tight_layout()
-    plt.show()
+    # Distance from every grid point to every bead
+    dist_grid_bead = np.linalg.norm(flat_grid[:, np.newaxis, :] - P[np.newaxis, :, :], axis=2)
+    K_grid = rbf(dist_grid_bead)
+    Q_grid = np.hstack([np.ones((N*N, 1)), flat_grid])
+    
+    # Final displacement calculation: (RBF Part) + (Affine Part)
+    dUx = (K_grid @ weights_x[:M]) + (Q_grid @ weights_x[M:])
+    dUy = (K_grid @ weights_y[:M]) + (Q_grid @ weights_y[M:])
+
+    return dUx.reshape(N, N), dUy.reshape(N, N)
+    
+def generate_mock_displacement(image_file : str = 'images/cell_boundary/img5.png', N = 100, width = 1): 
+    image_matrix = np.array(Image.open(image_file).convert('L'))
+    force_points, updated_image = detect_shapes(image_matrix, detection_threshold=0.5)
+    dx = width/N
+    dim = width/2
+    X = np.linspace(-dim, dim, N)
+    U = np.zeros((N, N, 2))
+    for point in force_points:
+        dU = np.zeros((N, N, 2))
+        v2 = np.array(point)
+        for i in range(0, N):
+            for j in range(0, N):
+                v1 = np.array((X[i], X[j]))
+                dU[i, j, :] = symmetric_gaussian(v1 - v2)  * dx * dx
+        U += dU
+    return U[:, :, 0], U[:, :, 1]

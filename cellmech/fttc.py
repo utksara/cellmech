@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from cellmech.utils import symmetric_gaussian
         
 def _getG(v : np.ndarray[tuple[int]], params : dict):
     x = v[0]
@@ -44,14 +45,6 @@ def _getGInv_Fourier(v, params):
     ])
     return (E * r**3)/(2*(1 + p)) * _matrix_2x2_inverse(M)
 
-def _symmetric_gaussian(v : np.ndarray[int, int]):
-    r2 = v[0]**2 + v[1]**2
-    r = np.sqrt(r2)
-    A = 10e-4 * np.exp(-10*r2)
-    cos = -v[0]/r
-    sin = -v[1]/r
-    return np.array([A*cos, A*sin])
-
 def _tensor_contraction(G_sub_matrix, force_field):
     S = np.einsum("lmij,lmi->j", G_sub_matrix, force_field)
     return S
@@ -69,13 +62,13 @@ class Filter():
         self.matrix = matrix
         self.size = matrix.shape[0]
         
-    def convolved(self, objective_matrix : np.ndarray):
+    def convolved(self, objective_matrix : np.ndarray, detection_threshold = 1.5):
         m = self.matrix.shape[0]
-        if np.sum(self.matrix * objective_matrix) >= 1.5*m:
+        if np.sum(self.matrix * objective_matrix) >= detection_threshold*m:
             return True
         return False
     
-def calculate_traction_force(force_points : list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force : callable = _symmetric_gaussian):
+def calculate_dummy_force(force_points : list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force : callable = symmetric_gaussian):
     params = cellmechparams.params
     N = params["N"]
     dx = params["width"]/N
@@ -149,7 +142,7 @@ def _line_filter(size = 10):
         filter[i, int(size/2)] = 1
     return filter
 
-def detect_shapes(image_matrix : np.ndarray, filter : Filter = Filter(_line_filter()), mode : str = "light"):
+def detect_shapes(image_matrix : np.ndarray, filter : Filter = Filter(_line_filter()), mode : str = "light", detection_threshold = 0.2):
     if mode == "light":
         image_matrix = 1 - image_matrix/255
     image_dim = image_matrix.shape
@@ -157,14 +150,14 @@ def detect_shapes(image_matrix : np.ndarray, filter : Filter = Filter(_line_filt
     m = filter.size
     for i in range(0, int(image_dim[0]/m)-1):
         for j in range(0, int(image_dim[1]/m)-1):
-            if filter.convolved(image_matrix[m*i: m*i+m, m*j: m*j+m]):
+            if filter.convolved(image_matrix[m*i: m*i+m, m*j: m*j+m], detection_threshold):
                 image_matrix[m*i: m*i+m, m*j: m*j+m] = 0.5
                 x =  -1 + 2*i/(int(image_dim[0]/m)-1)
                 y =  -1 + 2*j/(int(image_dim[1]/m)-1)
                 shape_points.append((x, y))
     return shape_points, image_matrix
     
-def calcualte_traction(displacement : np.ndarray, cellmechparams: CellMechParameters):
+def calculate_traction_force(displacement : np.ndarray, cellmechparams: CellMechParameters):
     params = cellmechparams.params
     Nx = displacement.shape[0]
     Ny = displacement.shape[1] 

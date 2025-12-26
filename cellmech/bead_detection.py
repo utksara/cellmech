@@ -97,98 +97,86 @@ def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def
 import numpy as np
 from scipy.ndimage import maximum_filter
 
+import numpy as np
+from scipy.ndimage import maximum_filter
+
 def bead_image_correlation(image1, image2, N):
     """
-    Calculates the displacement field using Thin Plate Spline (TPS) interpolation.
-    Maintains the requested signature and internal logic flow.
+    Calculates a smooth, non-vanishing displacement field using 
+    Normalized Gaussian Radial Basis Function interpolation.
     """
     
     # 1. Initialize NxN displacement field
     dUx = np.zeros((N, N))
     dUy = np.zeros((N, N))
     
-    # 2. Extract bead positions (finding local maxima)
-    def get_bead_positions(img, threshold_percentile=98):
-        threshold = np.percentile(img, threshold_percentile)
-        data_max = maximum_filter(img, size=5)
-        maxima = (img == data_max) & (img > threshold)
-        return np.argwhere(maxima) # Returns [row, col] -> [y, x]
+    # 2. Extract bead positions (Local Maxima)
+    def get_bead_positions(img):
+        # Threshold at 95th percentile to isolate bright beads
+        thresh = np.percentile(img, 95)
+        local_max = maximum_filter(img, size=5) == img
+        coords = np.argwhere(local_max & (img > thresh))
+        return coords # [y, x]
 
     beads1 = get_bead_positions(image1)
     beads2 = get_bead_positions(image2)
 
-    # 3. Map beads and calculate displacement (O(M) correlation)
-    ux_list, uy_list, coords_list = [], [], []
+    if len(beads1) == 0 or len(beads2) == 0:
+        return dUx, dUy
 
+    # 3. Map beads (Nearest Neighbor)
+    ux_list, uy_list, pos_list = [], [], []
     for b1 in beads1:
-        # Simple Euclidean distance mapping to find the same bead in image2
-        distances = np.linalg.norm(beads2 - b1, axis=1)
-        if len(distances) == 0: continue
-        
-        idx = np.argmin(distances)
-        if distances[idx] < 30:  # Search radius threshold
+        # Vectorized distance to find corresponding bead in image2
+        dist = np.linalg.norm(beads2 - b1, axis=1)
+        idx = np.argmin(dist)
+        if dist[idx] < 25: # Max search radius in pixels
             b2 = beads2[idx]
             uy_list.append(b2[0] - b1[0])
             ux_list.append(b2[1] - b1[1])
-            coords_list.append(b1)
+            pos_list.append(b1)
 
-    # Convert to arrays: P contains [y, x], U contains [uy, ux]
-    P = np.array(coords_list)
-    U = np.vstack([uy_list, ux_list]).T
+    Ux = np.array(ux_list)
+    Uy = np.array(uy_list)
+    P = np.array(pos_list) # [y, x]
     M = P.shape[0]
 
-    if M < 3:
-        raise ValueError("Not enough beads found to calculate a 2D displacement field.")
+    # 4. Numerically efficient grid computation
+    # Determine an optimal sigma (width) based on average bead spacing
+    # This prevents the field from "vanishing" between beads.
+    sigma = 20.0 # Standard width; could be dynamic: np.mean(dist_to_neighbors)
 
-    # 4. TPS Interpolation Logic (More accurate for few beads)
-    # Radial Basis Function kernel: r^2 * log(r)
-    def rbf(r):
-        mask = r > 0
-        res = np.zeros_like(r)
-        res[mask] = r[mask]**2 * np.log(r[mask])
-        return res
-
-    # Build the linear system L * W = Y
-    # K is (M x M) distance matrix through RBF
-    dist_matrix = np.linalg.norm(P[:, np.newaxis, :] - P[np.newaxis, :, :], axis=2)
-    K = rbf(dist_matrix)
-    
-    # Q is (M x 3) matrix containing [1, y, x]
-    Q = np.hstack([np.ones((M, 1)), P])
-    
-    # Construct the full TPS matrix
-    L = np.block([
-        [K,               Q],
-        [Q.T, np.zeros((3, 3))]
-    ])
-    
-    # Targeted values (displacements) padded with zeros for the affine part
-    Y_x = np.concatenate([U[:, 1], np.zeros(3)])
-    Y_y = np.concatenate([U[:, 0], np.zeros(3)])
-    
-    # Solve for weights (coefficients)
-    weights_x = np.linalg.solve(L, Y_x)
-    weights_y = np.linalg.solve(L, Y_y)
-
-    # 5. Compute entire displacement field on NxN grid
     rows, cols = image1.shape
     y_grid = np.linspace(0, rows - 1, N)
     x_grid = np.linspace(0, cols - 1, N)
     grid_Y, grid_X = np.meshgrid(y_grid, x_grid, indexing='ij')
     
-    # Flatten grid for vectorized computation
-    flat_grid = np.stack([grid_Y.ravel(), grid_X.ravel()], axis=1)
-    
-    # Distance from every grid point to every bead
-    dist_grid_bead = np.linalg.norm(flat_grid[:, np.newaxis, :] - P[np.newaxis, :, :], axis=2)
-    K_grid = rbf(dist_grid_bead)
-    Q_grid = np.hstack([np.ones((N*N, 1)), flat_grid])
-    
-    # Final displacement calculation: (RBF Part) + (Affine Part)
-    dUx = (K_grid @ weights_x[:M]) + (Q_grid @ weights_x[M:])
-    dUy = (K_grid @ weights_y[:M]) + (Q_grid @ weights_y[M:])
+    # Flatten for vectorized broadcasting
+    flat_Y = grid_Y.ravel()
+    flat_X = grid_X.ravel()
 
-    return dUx.reshape(N, N), dUy.reshape(N, N)
+    # Process in batches if memory is an issue, but for NxN it's usually fine
+    # Calculate squared distances: (N*N, M)
+    # dist^2 = (y_grid - y_bead)^2 + (x_grid - x_bead)^2
+    dy = flat_Y[:, np.newaxis] - P[:, 0]
+    dx = flat_X[:, np.newaxis] - P[:, 1]
+    dist_sq = dy**2 + dx**2
+
+    # 5. Gaussian Summation with Normalization (The Fix)
+    # weights(i,j) = exp(-dist^2 / (2*sigma^2))
+    weights = np.exp(-dist_sq / (2 * sigma**2))
+    
+    # sum_weights is the total influence at each grid point
+    sum_weights = np.sum(weights, axis=1)
+    
+    # Avoid division by zero in empty areas
+    sum_weights[sum_weights == 0] = 1e-9
+
+    # dUx(i,j) = sum(Ux_bead * weight) / sum(weights)
+    flat_dUx = np.sum(Ux * weights, axis=1) / sum_weights
+    flat_dUy = np.sum(Uy * weights, axis=1) / sum_weights
+
+    return flat_dUx.reshape(N, N), flat_dUy.reshape(N, N)
     
 def generate_mock_displacement(image_file : str = 'images/cell_boundary/img5.png', N = 100, width = 1): 
     image_matrix = np.array(Image.open(image_file).convert('L'))

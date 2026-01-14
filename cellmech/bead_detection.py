@@ -94,103 +94,135 @@ def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def
     ssd = np.sum((ref_subset - def_subset_interpolated)**2)
     return ssd
 
-import numpy as np
-from scipy.ndimage import maximum_filter
 
-import numpy as np
-from scipy.ndimage import maximum_filter
-
-def bead_image_correlation(image1, image2, N):
+def bead_image_correlation_dense(
+    image1: np.ndarray,
+    image2: np.ndarray,
+    N: int,
+    Nc: int = 8,
+    min_corr: float = 0.1
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Calculates a smooth, non-vanishing displacement field using 
-    Normalized Gaussian Radial Basis Function interpolation.
+    Multi-scale bead correlation:
+    - Coarse displacement estimation with large windows
+    - Interpolation to requested resolution
+
+    Parameters
+    ----------
+    image1, image2 : 2D arrays
+    N : int
+        Requested output displacement grid size (N x N)
+    Nc : int
+        Coarse grid size (Nc x Nc), Nc << N
+    min_corr : float
+        Minimum correlation peak
+
+    Returns
+    -------
+    Ux, Uy : np.ndarray
+        Displacement fields of shape (N, N)
     """
-    
-    # 1. Initialize NxN displacement field
-    dUx = np.zeros((N, N))
-    dUy = np.zeros((N, N))
-    
-    # 2. Extract bead positions (Local Maxima)
-    def get_bead_positions(img):
-        # Threshold at 95th percentile to isolate bright beads
-        thresh = np.percentile(img, 95)
-        local_max = maximum_filter(img, size=5) == img
-        coords = np.argwhere(local_max & (img > thresh))
-        return coords # [y, x]
 
-    beads1 = get_bead_positions(image1)
-    beads2 = get_bead_positions(image2)
+    if image1.ndim != 2 or image2.ndim != 2:
+        raise ValueError("Images must be 2D.")
 
-    if len(beads1) == 0 or len(beads2) == 0:
-        return dUx, dUy
+    H = min(image1.shape[0], image2.shape[0])
+    W = min(image1.shape[1], image2.shape[1])
+    image1 = image1[:H, :W]
+    image2 = image2[:H, :W]
 
-    # 3. Map beads (Nearest Neighbor)
-    ux_list, uy_list, pos_list = [], [], []
-    for b1 in beads1:
-        # Vectorized distance to find corresponding bead in image2
-        dist = np.linalg.norm(beads2 - b1, axis=1)
-        idx = np.argmin(dist)
-        if dist[idx] < 25: # Max search radius in pixels
-            b2 = beads2[idx]
-            uy_list.append(b2[0] - b1[0])
-            ux_list.append(b2[1] - b1[1])
-            pos_list.append(b1)
+    # --- Coarse grid window size ---
+    wy = H // Nc
+    wx = W // Nc
+    w = min(wy, wx)
 
-    Ux = np.array(ux_list)
-    Uy = np.array(uy_list)
-    P = np.array(pos_list) # [y, x]
-    M = P.shape[0]
+    Uc_x = np.full((Nc, Nc), np.nan)
+    Uc_y = np.full((Nc, Nc), np.nan)
 
-    # 4. Numerically efficient grid computation
-    # Determine an optimal sigma (width) based on average bead spacing
-    # This prevents the field from "vanishing" between beads.
-    sigma = 20.0 # Standard width; could be dynamic: np.mean(dist_to_neighbors)
+    win1d = np.hanning(w)
+    window = np.outer(win1d, win1d)
 
-    rows, cols = image1.shape
-    y_grid = np.linspace(0, rows - 1, N)
-    x_grid = np.linspace(0, cols - 1, N)
-    grid_Y, grid_X = np.meshgrid(y_grid, x_grid, indexing='ij')
-    
-    # Flatten for vectorized broadcasting
-    flat_Y = grid_Y.ravel()
-    flat_X = grid_X.ravel()
+    for j in range(Nc):
+        for i in range(Nc):
+            y0 = j * wy
+            x0 = i * wx
 
-    # Process in batches if memory is an issue, but for NxN it's usually fine
-    # Calculate squared distances: (N*N, M)
-    # dist^2 = (y_grid - y_bead)^2 + (x_grid - x_bead)^2
-    dy = flat_Y[:, np.newaxis] - P[:, 0]
-    dx = flat_X[:, np.newaxis] - P[:, 1]
-    dist_sq = dy**2 + dx**2
+            win1 = image1[y0:y0+w, x0:x0+w].astype(float)
+            win2 = image2[y0:y0+w, x0:x0+w].astype(float)
 
-    # 5. Gaussian Summation with Normalization (The Fix)
-    # weights(i,j) = exp(-dist^2 / (2*sigma^2))
-    weights = np.exp(-dist_sq / (2 * sigma**2))
-    
-    # sum_weights is the total influence at each grid point
-    sum_weights = np.sum(weights, axis=1)
-    
-    # Avoid division by zero in empty areas
-    sum_weights[sum_weights == 0] = 1e-9
+            if win1.shape != (w, w) or win2.shape != (w, w):
+                continue
 
-    # dUx(i,j) = sum(Ux_bead * weight) / sum(weights)
-    flat_dUx = np.sum(Ux * weights, axis=1) / sum_weights
-    flat_dUy = np.sum(Uy * weights, axis=1) / sum_weights
+            std1 = win1.std()
+            std2 = win2.std()
+            if std1 < 1e-6 or std2 < 1e-6:
+                continue
 
-    return flat_dUx.reshape(N, N), flat_dUy.reshape(N, N)
-    
-def generate_mock_displacement(image_file : str = 'images/cell_boundary/img5.png', N = 100, width = 1): 
-    image_matrix = np.array(Image.open(image_file).convert('L'))
-    force_points, updated_image = detect_shapes(image_matrix, detection_threshold=0.5)
-    dx = width/N
-    dim = width/2
-    X = np.linspace(-dim, dim, N)
-    U = np.zeros((N, N, 2))
-    for point in force_points:
-        dU = np.zeros((N, N, 2))
-        v2 = np.array(point)
-        for i in range(0, N):
-            for j in range(0, N):
-                v1 = np.array((X[i], X[j]))
-                dU[i, j, :] = symmetric_gaussian(v1 - v2)  * dx * dx
-        U += dU
-    return U[:, :, 0], U[:, :, 1]
+            win1 = (win1 - win1.mean()) / std1
+            win2 = (win2 - win2.mean()) / std2
+            win1 *= window
+            win2 *= window
+
+            F1 = np.fft.fft2(win1)
+            F2 = np.fft.fft2(win2)
+            corr = np.fft.ifft2(F1 * np.conj(F2)).real
+            corr = np.fft.fftshift(corr)
+
+            peak = corr.max()
+            if peak < min_corr:
+                continue
+
+            py, px = np.unravel_index(np.argmax(corr), corr.shape)
+            dy = py - w // 2
+            dx = px - w // 2
+
+            Uc_x[j, i] = dx
+            Uc_y[j, i] = dy
+
+    # Replace NaNs with 0
+    Uc_x = np.nan_to_num(Uc_x, nan=0.0)
+    Uc_y = np.nan_to_num(Uc_y, nan=0.0)
+
+    # --- Interpolate to N x N ---
+    y_coarse = np.linspace(0, 1, Nc)
+    x_coarse = np.linspace(0, 1, Nc)
+    y_fine = np.linspace(0, 1, N)
+    x_fine = np.linspace(0, 1, N)
+
+    # Bilinear interpolation using separability
+    Ux = np.zeros((N, N))
+    Uy = np.zeros((N, N))
+
+    for j in range(N):
+        for i in range(N):
+            yc = y_fine[j]
+            xc = x_fine[i]
+
+            jy = np.searchsorted(y_coarse, yc) - 1
+            ix = np.searchsorted(x_coarse, xc) - 1
+            jy = np.clip(jy, 0, Nc-2)
+            ix = np.clip(ix, 0, Nc-2)
+
+            y0 = y_coarse[jy]
+            y1 = y_coarse[jy+1]
+            x0 = x_coarse[ix]
+            x1 = x_coarse[ix+1]
+
+            ty = (yc - y0) / (y1 - y0 + 1e-12)
+            tx = (xc - x0) / (x1 - x0 + 1e-12)
+
+            # Bilinear interpolation
+            Ux[j, i] = (
+                (1-ty)*(1-tx)*Uc_x[jy, ix] +
+                (1-ty)*tx*Uc_x[jy, ix+1] +
+                ty*(1-tx)*Uc_x[jy+1, ix] +
+                ty*tx*Uc_x[jy+1, ix+1]
+            )
+            Uy[j, i] = (
+                (1-ty)*(1-tx)*Uc_y[jy, ix] +
+                (1-ty)*tx*Uc_y[jy, ix+1] +
+                ty*(1-tx)*Uc_y[jy+1, ix] +
+                ty*tx*Uc_y[jy+1, ix+1]
+            )
+
+    return Ux, Uy

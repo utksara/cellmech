@@ -1,13 +1,8 @@
 import numpy as np
 from scipy.ndimage import shift as ndimage_shift, map_coordinates
-from scipy.ndimage import maximum_filter
-import matplotlib.pyplot as plt
-from typing import Tuple, List
-from PIL import Image
-from cellmech.utils import symmetric_gaussian
-from cellmech.fttc import detect_shapes
+from typing import Tuple
 
-def generate_mock_beads_center(num_beads: int, max_range : int):
+def generate_mock_beads_center(num_beads: int, max_range: int):
     # Generate random bead centers and radii
     centers = []
     for _ in range(num_beads):
@@ -16,78 +11,82 @@ def generate_mock_beads_center(num_beads: int, max_range : int):
         c_center = np.random.randint(10, max_range)
         centers.append((r_center, c_center))
     return centers
-    
-def generate_mock_bead_image(size: int, centers: np.ndarray, noise_level: float = 0.05, dUx : np.ndarray = np.zeros((1,1)), dUy: np.ndarray = np.zeros((1,1))) -> np.ndarray:
+
+
+def generate_mock_bead_image(size: int, centers: np.ndarray, noise_level: float = 0.05, dUx: np.ndarray = np.zeros((1, 1)), dUy: np.ndarray = np.zeros((1, 1))) -> np.ndarray:
     """Generates a mock image with random beads, applying optional uniform displacement."""
     img = np.zeros((size, size), dtype=np.float64)
     np.random.seed(42)  # For reproducible bead positions
-        
+
     for r_center, c_center in centers:
         # Define bead parameters (for simple Gaussian-like spots)
         radius = np.random.uniform(2.0, 4.0)
-        
+
         # Apply displacement to center for the deformed image
-        r_current = r_center + dUx[r_center, c_center] 
+        r_current = r_center + dUx[r_center, c_center]
         c_current = c_center + dUy[r_center, c_center]
-        
+
         # Create a Gaussian spot (approximating a bead)
         for r in range(size):
             for c in range(size):
                 distance_sq = (r - r_current)**2 + (c - c_current)**2
                 intensity = np.exp(-distance_sq / (2.0 * radius**2))
                 img[r, c] += intensity
-                
+
     # Normalize and add noise
     img = (img - img.min()) / (img.max() - img.min())
     noise = np.random.randn(size, size) * noise_level
     img += noise
     img = np.clip(img, 0, 1)
-    
+
     return img
+
 
 def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def_img: np.ndarray, ref_center: Tuple[int, int], subset_half: int) -> float:
     """
     Sum of Squared Differences (SSD) objective function for optimization.
-    
+
     This function calculates the SSD between the reference subset and the
     interpolated deformed subset shifted by the candidate displacement (u, v).
-    
+
     Args:
         displacement (u, v): Candidate displacement in x (columns) and y (rows).
         ref_subset: The reference image subset (SUBSET_SIZE x SUBSET_SIZE).
         def_img: The full deformed image.
         ref_center: (row, col) coordinates of the subset center in the reference image.
         subset_half: Half the subset size (SUBSET_SIZE // 2).
-        
+
     Returns:
         The SSD value (a scalar to be minimized).
     """
-    u, v = displacement[0], displacement[1] # u is x-displacement (col), v is y-displacement (row)
-    
+    u, v = displacement[0], displacement[
+        1]  # u is x-displacement (col), v is y-displacement (row)
+
     # Generate the local coordinate grid for the reference subset, centered at (0, 0)
-    y_grid, x_grid = np.mgrid[-subset_half:subset_half+1, -subset_half:subset_half+1]
-    
+    y_grid, x_grid = np.mgrid[-subset_half:subset_half +
+                              1, -subset_half:subset_half+1]
+
     # Calculate the floating point coordinates in the deformed image space (Y, X)
     # Coordinates = (Reference Center + Displacement) + Local Grid Offset
     y_def = y_grid + ref_center[0] + v
     x_def = x_grid + ref_center[1] + u
-    
+
     # Check if the coordinates are within bounds. If not, penalize heavily.
     if np.any(y_def < 0) or np.any(y_def >= def_img.shape[0]) or \
        np.any(x_def < 0) or np.any(x_def >= def_img.shape[1]):
         # Return a very large value to discourage this displacement near the boundary
         return 1e10
-    
+
     # The coordinates array for map_coordinates must be [y_coords, x_coords] and flattened
     coords = np.array([y_def.flatten(), x_def.flatten()])
-    
+
     # Interpolate the deformed subset G_d(x+u, y+v) using map_coordinates
     # Order=3 for cubic spline interpolation (high quality).
     def_subset_interpolated = map_coordinates(
-        input=def_img, 
-        coordinates=coords, 
-        order=3, 
-        mode='nearest' # Use nearest mode for boundary handling outside the check
+        input=def_img,
+        coordinates=coords,
+        order=3,
+        mode='nearest'  # Use nearest mode for boundary handling outside the check
     ).reshape(ref_subset.shape)
 
     # Calculate SSD
@@ -95,7 +94,7 @@ def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def
     return ssd
 
 
-def bead_image_correlation_dense(
+def bead_image_correlation(
     image1: np.ndarray,
     image2: np.ndarray,
     N: int,

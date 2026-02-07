@@ -1,4 +1,4 @@
-from cellmech.bead_detection import bead_image_correlation, generate_mock_beads_center, generate_mock_bead_image, generate_mock_displacement
+from cellmech.imgproc.bead_detection import bead_image_correlation
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns

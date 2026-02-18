@@ -22,9 +22,9 @@ displacement_field_array = bead_image_correlation(
 
 # Extract coordinates (Y, X) and displacements (U, V)
 # Y, X = displacement_field_array[:, 0], displacement_field_array[:, 1]
-U, V = displacement_field_array
-sns.heatmap(U**2 + V**2)
-plt.title("displacement using bead corr")
-plt.legend()
-plt.show()
+# U, V = displacement_field_array
+# sns.heatmap(U**2 + V**2)
+# plt.title("displacement using bead corr")
+# plt.legend()
+# plt.show()
     

@@ -115,7 +115,7 @@ def detect_shapes_deprecated(image_matrix: np.ndarray, filter: Filter = Filter(_
         for j in range(0, int(image_dim[1]/m)-1):
             if filter.convolved(image_matrix[m*i: m*i+m, m*j: m*j+m], detection_threshold):
                 image_matrix[m*i: m*i+m, m*j: m*j+m] = 0.5
-                x = -1 + 2*i/(int(image_dim[0]/m)-1)
-                y = -1 + 2*j/(int(image_dim[1]/m)-1)
+                x = -1 + 2*j/(int(image_dim[1]/m)-1)
+                y =  1 - 2*i/(int(image_dim[0]/m)-1)
                 shape_points.append((x, y))
     return np.array(shape_points), image_matrix

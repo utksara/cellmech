@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from cellmech.utils import symmetric_gaussian
+from cellmech.utils import symmetric_gaussian, simple_unit_force
 
 
 def _getG(v: np.ndarray[tuple[int]], params: dict):
@@ -10,6 +10,7 @@ def _getG(v: np.ndarray[tuple[int]], params: dict):
     pi = params["pi"]
     E = params["E"]
     r = np.sqrt(x**2 + y**2) + 1e-4
+    # return np.array([[1/r, 0], [0, 1/r]])
     return (1 + p)/(pi * E * r**3) * np.array([
         [(1 - p) * r**2 + p * x**2, p*x*y],
         [p*x*y,                     (1 - p) * r**2 + p * y**2]
@@ -51,9 +52,8 @@ def _getGInv_Fourier(v, params):
 
 
 def _tensor_contraction(G_sub_matrix, force_field):
-    S = np.einsum("lmij,lmj->i", G_sub_matrix, force_field)
+    S = np.einsum("lmij,lmi->j", G_sub_matrix, force_field)
     return S
-
 
 class CellMechParameters():
     required_params = ["pi", "E", "pi", "N", "width", "pixel_size"]
@@ -127,21 +127,35 @@ def calculate_analytical_displacement(force_field,
     return u
 
 
-def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force: callable = symmetric_gaussian):
+def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force: callable = simple_unit_force):
     params = cellmechparams.params
     N = params["N"]
     dx = params["width"]/N
     dim = params["width"]/2
     X = np.linspace(-dim, dim, N)
     U = np.zeros((N, N, 2))
+    v_centr = np.mean(np.array(force_points), axis=0)
+    i = int((v_centr[0] + dim)*(N-1)/(2*dim))
+    j = int((v_centr[1] + dim)*(N-1)/(2*dim))
+    U[i - 1, j, :] = custom_force(np.array([-1, 0]))
+    U[i, j + 1, :] = custom_force(np.array([0, 1]))
+    U[i, j - 1, :] = custom_force(np.array([0, -1]))
+    U[i + 1, j, :] = custom_force(np.array([1, 0]))
+    print(f'central point of all forces {v_centr}')
     for point in force_points:
-        dU = np.zeros((N, N, 2))
+        # dU = np.zeros((N, N, 2))
         v2 = np.array(point)
-        for i in range(0, N):
-            for j in range(0, N):
-                v1 = np.array((X[i], X[j]))
-                dU[i, j, :] = custom_force(v1 - v2) * dx * dx
-        U += dU
+        # finding the position of the force points
+        i = int((v2[0] + dim)*(N-1)/(2*dim))
+        j = int((v2[1] + dim)*(N-1)/(2*dim))
+        # print(f'force calculated at point {v2} of value {custom_force(v_centr - v2)}')
+        U[i, j, :] = custom_force(v_centr - v2)
+        print(f'U force {U[i, j, :]}, point : {v2}')
+        # for i in range(0, N):
+        #     for j in range(0, N):
+        #         v1 = np.array((X[i], X[j]))
+        #         dU[i, j, :] = custom_force(v1 - v2)
+        # U += dU
     return U
 
 
@@ -199,62 +213,113 @@ def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
 
     return np.stack([Ux, Uy], axis=-1)
 
-def fttc_displacement_to_force(U_field, pixel_size, youngs_modulus, poisson_ratio, reg_param=1e-10):
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+def calculate_tensile_strain_field(u_field, dx, sigma=0):
     """
-    Converts a 2D displacement field to a traction force field using 
-    regularized Fourier Transform Traction Cytometry (FTTC).
+    Computes the maximum principal strain (tensile strain) field.
     
     Parameters:
-    U_field: ndarray of shape (N, N, 2) -> [Ux, Uy] in meters
-    pixel_size: meters per pixel
-    youngs_modulus: E in Pascals
-    poisson_ratio: nu (typically 0.5)
-    reg_param: Lambda (regularization parameter)
+    -----------
+    u_field : (N, N, 2) array
+        Displacement field (Ux, Uy).
+    dx : float
+        Physical pixel size.
+    sigma : float
+        Standard deviation for Gaussian smoothing (0 = no smoothing).
+        
+    Returns:
+    --------
+    eps_1 : (N, N) array
+        Maximum principal strain field.
     """
+    ux = u_field[:, :, 0]
+    uy = u_field[:, :, 1]
+
+    # Optional smoothing to prevent gradient noise
+    if sigma > 0:
+        ux = gaussian_filter(ux, sigma=sigma)
+        uy = gaussian_filter(uy, sigma=sigma)
+
+    # 1. Compute Gradients
+    # axis 0 is y (rows), axis 1 is x (cols)
+    dux_dy, dux_dx = np.gradient(ux, dx)
+    duy_dy, duy_dx = np.gradient(uy, dx)
+
+    # 2. Define Strain Tensor Components
+    exx = dux_dx
+    eyy = duy_dy
+    exy = 0.5 * (dux_dy + duy_dx)
+
+    # 3. Calculate First Principal Strain (Maximum Tension)
+    # This formula finds the eigenvalues of the 2D strain tensor
+    mean_strain = (exx + eyy) / 2
+    diff_strain = np.sqrt(((exx - eyy) / 2)**2 + exy**2)
+    
+    eps_1 = mean_strain + diff_strain
+    
+    return eps_1
+
+def fttc_displacement_to_force(U_field, pixel_size, youngs_modulus, poisson_ratio, reg_param=1e-10):
     N = U_field.shape[0]
     Ux = U_field[:, :, 0]
     Uy = U_field[:, :, 1]
 
-    # 1. Setup Frequency Space
+    # 1. Setup Frequency Space (Angular frequency)
     freq = np.fft.fftfreq(N, d=pixel_size)
     kx, ky = np.meshgrid(freq, freq)
     k_mag = np.sqrt(kx**2 + ky**2)
-    k_mag[0, 0] = np.inf # Avoid division by zero
+    
+    # Avoid division by zero for the Green's function
+    k_safe = np.where(k_mag == 0, 1e-10, k_mag)
 
     # 2. Fourier Transform of Displacements
     FT_Ux = np.fft.fft2(Ux)
     FT_Uy = np.fft.fft2(Uy)
 
-    # 3. Green's Tensor in Fourier Space (Boussinesq)
-    # Pre-factor: G_ij = coeff * M_ij
-    coeff = youngs_modulus * k_mag * 0.5 / (1 - poisson_ratio**2) 
+    # 3. Define the Forward Green's Tensor components (Traction -> Displacement)
+    # G_tilde = coeff * [[M11, M12], [M21, M22]]
+    # Pre-factor for Boussinesq surface: 2(1+nu)/(E*k)
+    coeff = (2 * (1 + poisson_ratio)) / (youngs_modulus * k_safe)
     
-    G11 = coeff * (1 - poisson_ratio + poisson_ratio * (ky**2 / k_mag**2))
-    G12 = coeff * (poisson_ratio * (kx * ky / k_mag**2))
+    G11 = coeff * (1 - poisson_ratio + poisson_ratio * (ky**2 / k_safe**2))
+    G22 = coeff * (1 - poisson_ratio + poisson_ratio * (kx**2 / k_safe**2))
+    G12 = coeff * (-poisson_ratio * (kx * ky / k_safe**2))
     G21 = G12
-    G22 = coeff * (1 - poisson_ratio + poisson_ratio * (kx**2 / k_mag**2))
 
     # 4. Tikhonov Regularized Inversion
-    # We solve: F = (G.T * G + lambda^2 * I)^-1 * G.T * U
-    # Since G is a 2x2 matrix at each k-point, we can solve it analytically.
+    # Formula: FT_F = inv(G^2 + lambda^2 * I) * G * FT_U
+    # This effectively solves the inverse while suppressing high-frequency noise
     
-    # Determinant of (G^T G + lambda^2 I)
-    # Note: For symmetric G, G^T G is just G squared.
-    det = (G11**2 + G12**2 + reg_param**2) * (G22**2 + G21**2 + reg_param**2) - \
-          (G11*G21 + G12*G22)**2
+    # Common denominator for the regularized inversion
+    # We use G_mag_sq + reg^2 to dampen the inversion of small G values
+    G_det = G11 * G22 - G12 * G21
+    denom = G11**2 + G22**2 + 2*G12**2 + reg_param**2
+    
+    # FT_F = (G_transpose / (G^2 + reg^2)) * FT_U
+    # For a more robust inversion, we calculate the inverse of G directly 
+    # and apply a Tikhonov window:
+    
+    # Analytical 2x2 inverse components for G
+    invG11 = G22 / (G_det + reg_param)
+    invG22 = G11 / (G_det + reg_param)
+    invG12 = -G12 / (G_det + reg_param)
+    
+    # Apply high-frequency rollout/regularization filter
+    # This prevents the 1/k singularity from blowing up noise
+    reg_filter = k_mag**2 / (k_mag**2 + reg_param**2)
+    
+    FT_Fx = (invG11 * FT_Ux + invG12 * FT_Uy) * reg_filter
+    FT_Fy = (invG12 * FT_Ux + invG22 * FT_Uy) * reg_filter
 
-    # Applying the inverse filter
-    FT_Fx = ((G11 * FT_Ux + G21 * FT_Uy) * (G22**2 + G21**2 + reg_param**2) - 
-             (G12 * FT_Ux + G22 * FT_Uy) * (G11*G21 + G12*G22)) / det
-             
-    FT_Fy = ((G12 * FT_Ux + G22 * FT_Uy) * (G11**2 + G12**2 + reg_param**2) - 
-             (G11 * FT_Ux + G21 * FT_Uy) * (G11*G21 + G12*G22)) / det
-
-    # Handle the DC component
+    # Handle the DC component (no net force)
     FT_Fx[0, 0] = 0
     FT_Fy[0, 0] = 0
 
     # 5. Inverse FFT to Real Space
+    # Note: No need to divide by pixel_size**2 here if Ux/Uy are in meters,
+    # as the Green's function units (m/Pa) handle the conversion to Pascals.
     Fx = np.real(np.fft.ifft2(FT_Fx))
     Fy = np.real(np.fft.ifft2(FT_Fy))
 
@@ -263,10 +328,10 @@ def fttc_displacement_to_force(U_field, pixel_size, youngs_modulus, poisson_rati
 
 def calcualte_displacement(force_field: np.ndarray, cellmechparams: CellMechParameters, method: str = "fttc"):
     params = cellmechparams.params
-    if method == "tn":
+    if method == "tn": 
         N = force_field.shape[0]
         dim = params["width"]/2
-        dx = params["width"]/N
+        dx = params["width"]/N 
         G_matrix = np.zeros((2*N - 1, 2*N - 1, 2, 2))
         displacement = np.zeros((N, N, 2))
         X_ext = np.linspace(-2*dim + dim/N, 2*dim - dim/N, 2*N - 1)
@@ -279,10 +344,9 @@ def calcualte_displacement(force_field: np.ndarray, cellmechparams: CellMechPara
             for m in range(0, N - 1):
                 v = np.array((X_ext[l], X_ext[m]))
                 G = G_matrix[l:l + N, m:m + N, :, :]
-                displacement[l, m, :] = _tensor_contraction(
-                    G, force_field) * dx * dx
+                displacement[l, m, :] = _tensor_contraction(G, force_field)  * dx * dx
         return displacement
-
+    
     if method == "fttc":
         return fttc_force_to_displacement(force_field, params["E"], params["p"], params["width"]/params["N"])
 
@@ -294,10 +358,13 @@ def plot_vector_field(force_field: np.ndarray, title=None):
     N = force_field.shape[0]
     x = np.linspace(-dim, dim, N)
     y = np.linspace(-dim, dim, N)
-    X, Y = np.meshgrid(x, y)
-    plt.quiver(X, Y, force_field[:, :, 0], force_field[:, :, 1])
+    X, Y = np.meshgrid(x, y, indexing='ij')
+    max_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:, :, 1]**2))
+    plt.quiver(X, Y, force_field[:, :, 0]/max_force, force_field[:, :, 1]/max_force, scale=20)
     if title is not None:
         plt.title(title)
+    plt.xlabel("X - axis")
+    plt.ylabel("Y - axis")
     plt.show()
     
 

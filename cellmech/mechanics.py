@@ -3,27 +3,28 @@ import matplotlib.pyplot as plt
 from cellmech.utils import symmetric_gaussian, simple_unit_force
 
 
-def _getG(v: np.ndarray[tuple[int]], params: dict):
+def getG(v: np.ndarray[tuple[int]], params: dict):
     x = v[0]
     y = v[1]
     p = params["p"]
     pi = params["pi"]
     E = params["E"]
-    r = np.sqrt(x**2 + y**2) + 1e-4
-    # return np.array([[1/r, 0], [0, 1/r]])
+    r = np.sqrt(x**2 + y**2)
+    if r<=1e-3 : return np.zeros((2,2))
     return (1 + p)/(pi * E * r**3) * np.array([
         [(1 - p) * r**2 + p * x**2, p*x*y],
-        [p*x*y,                     (1 - p) * r**2 + p * y**2]
+        [p*x*y, (1 - p) * r**2 + p * y**2]
     ])
 
 
-def _getG_Fourier(v: np.ndarray[tuple[int]], params: dict):
+def getG_Fourier(v: np.ndarray[tuple[int]], params: dict):
     x = v[0]
     y = v[1]
     p = params["p"]
     pi = params["pi"]
     E = params["E"]
-    r = np.sqrt(x**2 + y**2) + 1e-4
+    r = np.sqrt(x**2 + y**2)
+    if r<=1e-3 : return np.zeros((2,2))
     return 2*(1 + p)/(pi * E * r**3) * np.array([
         [(1 - p) * r**2 + p * y**2, -p*x*y],
         [-p*x*y,                    (1 - p) * r**2 + p * x**2]
@@ -37,7 +38,7 @@ def _matrix_2x2_inverse(A: np.ndarray[tuple[tuple[int]]]):
     return factor*M
 
 
-def _getGInv_Fourier(v, params):
+def getGInv_Fourier(v, params):
     x = v[0]
     y = v[1]
     p = params["p"]
@@ -51,7 +52,7 @@ def _getGInv_Fourier(v, params):
     return (E * r**3)/(2*(1 + p)) * _matrix_2x2_inverse(M)
 
 
-def _tensor_contraction(G_sub_matrix, force_field):
+def tensor_contraction(G_sub_matrix, force_field):
     S = np.einsum("lmij,lmi->j", G_sub_matrix, force_field)
     return S
 
@@ -129,6 +130,7 @@ def calculate_analytical_displacement(force_field,
 
 def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force: callable = simple_unit_force):
     params = cellmechparams.params
+    scaling = 1e-6 # force in micro newtons
     N = params["N"]
     dx = params["width"]/N
     dim = params["width"]/2
@@ -150,13 +152,8 @@ def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparam
         j = int((v2[1] + dim)*(N-1)/(2*dim))
         # print(f'force calculated at point {v2} of value {custom_force(v_centr - v2)}')
         U[i, j, :] = custom_force(v_centr - v2)
-        print(f'U force {U[i, j, :]}, point : {v2}')
-        # for i in range(0, N):
-        #     for j in range(0, N):
-        #         v1 = np.array((X[i], X[j]))
-        #         dU[i, j, :] = custom_force(v1 - v2)
-        # U += dU
-    return U
+        # print(f'U force {U[i, j, :]}, point : {v2}')
+    return U * scaling
 
 
 def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
@@ -326,7 +323,7 @@ def fttc_displacement_to_force(U_field, pixel_size, youngs_modulus, poisson_rati
     return np.stack([Fx, Fy], axis=-1)
 
 
-def calcualte_displacement(force_field: np.ndarray, cellmechparams: CellMechParameters, method: str = "fttc"):
+def calculate_displacement(force_field: np.ndarray, cellmechparams: CellMechParameters, method: str = "fttc"):
     params = cellmechparams.params
     if method == "tn": 
         N = force_field.shape[0]
@@ -338,13 +335,12 @@ def calcualte_displacement(force_field: np.ndarray, cellmechparams: CellMechPara
         for l in range(0, 2*N - 1):
             for m in range(0, 2*N - 1):
                 v = np.array((X_ext[l], X_ext[m]))
-                G_matrix[l, m, :, :] = _getG(v, params)
+                G_matrix[l, m, :, :] = getG(v, params)
 
         for l in range(0, N - 1):
             for m in range(0, N - 1):
-                v = np.array((X_ext[l], X_ext[m]))
-                G = G_matrix[l:l + N, m:m + N, :, :]
-                displacement[l, m, :] = _tensor_contraction(G, force_field)  * dx * dx
+                G = G_matrix[int((2*N-1)/2) - l: int((2*N-1)/2) - l + N, int((2*N-1)/2) - m: int((2*N-1)/2) - m + N, :, :]
+                displacement[l, m, :] = tensor_contraction(G, force_field)  * dx * dx
         return displacement
     
     if method == "fttc":
@@ -371,7 +367,7 @@ def plot_vector_field(force_field: np.ndarray, title=None):
 def calculate_constrained_traction_force(displacement: np.ndarray, cellmechparams: CellMechParameters):
     traction_force = calculate_traction_force(displacement, cellmechparams)
     for i in range(0, 2):
-        recalc_displcemement = calcualte_displacement(traction_force, cellmechparams)
+        recalc_displcemement = calculate_displacement(traction_force, cellmechparams)
         recalc_traction_force = calculate_traction_force(recalc_displcemement, cellmechparams)
         mae = np.mean(np.abs(traction_force - recalc_traction_force))/np.mean(abs(traction_force))
         mme = np.mean(np.abs(traction_force - recalc_traction_force))/np.max(abs(traction_force))
@@ -399,14 +395,14 @@ def calculate_traction_force_tensor(displacement: np.ndarray, cellmechparams: Ce
     for l in range(0, 2*Nx - 1):
         for m in range(0, 2*Ny - 1):
             v = np.array((X_ext[l], X_ext[m]))
-            G_matrix[l, m, :, :] = _matrix_2x2_inverse(_getG(v, params))
+            G_matrix[l, m, :, :] = _matrix_2x2_inverse(getG(v, params))
 
     for l in range(0, Nx - 1):
         for m in range(0, Ny - 1):
             G = G_matrix[l:l + Nx, m:m + Ny, :, :]
             v = np.array((X_ext[l], X_ext[m]))
-            # D[l, m, :] = _getGInv_Fourier(v,params) @ U[l, m, :]
-            D[l, m, :] = _tensor_contraction(G, U) * dx * dy
+            # D[l, m, :] = getGInv_Fourier(v,params) @ U[l, m, :]
+            D[l, m, :] = tensor_contraction(G, U) * dx * dy
 
     # D = np.fft.ifft(D)
     # D = np.real(D)

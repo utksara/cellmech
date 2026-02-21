@@ -1,2 +1,2 @@
-from .imgproc.cell_detection import detect_shapes, plot_results, detect_shapes_deprecated
+from .imgproc.cell_detection import detect_shapes, view_cell_image, detect_shapes_canon
 from .mechanics import *

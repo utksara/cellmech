@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import convolve
 import seaborn as sns
 import matplotlib.pyplot as plt
+import os
 
 # definition of rectangular pulse function
 def rect_pulse(x, a):
@@ -125,14 +126,16 @@ def test_convolution_2d():
 
     # Discrete convolution
     conv_d = convolution2_discrete(g, r, dx)
-    sns.heatmap(conv_d)
-    plt.show()
+    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+        sns.heatmap(conv_d)
+        plt.show()
     
     # Analytical convolution
     conv_a = convolution2_analytical(xx, yy, a, sigma)
     print("max conv_a, max conv_d ", np.max(conv_a), np.max(conv_d))
-    sns.heatmap(conv_a)
-    plt.show()
+    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+        sns.heatmap(conv_a)
+        plt.show()
     
     # Check the difference
     assert np.allclose(conv_d, conv_a, atol=0.1)

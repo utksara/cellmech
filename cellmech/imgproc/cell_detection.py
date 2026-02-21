@@ -56,32 +56,30 @@ def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.5):
     cv2.drawContours(processed_image, outer_contours, -1, (0, 255, 0), 2)
 
     outer_contours = np.array(outer_contours[0])
+    outer_contours = outer_contours.astype(float)
     m = outer_contours.shape[0]
     outer_contours = outer_contours.reshape(m, 2)
-    
-    outer_contours = outer_contours - np.mean(outer_contours, axis = 0)
-    outer_contours[:,0] = 0.5*outer_contours[:,0]/(np.max(outer_contours[:,0]))
-    outer_contours[:,1] = 0.5*outer_contours[:,1]/(np.max(outer_contours[:,1]))
-    return outer_contours, processed_image
+
+    outer_contours[:, 0] = -1 + 2*outer_contours[:, 0]/(image_matrix.shape[1])
+    outer_contours[:, 1] = -1 + 2*outer_contours[:, 1]/(image_matrix.shape[0])
+    outer_contours = outer_contours - np.mean(outer_contours, axis=0)
+
+    return_contours = np.zeros((m, 2))
+    return_contours[:, 0] = outer_contours[:, 0]
+    return_contours[:, 1] = -outer_contours[:, 1]
+    return return_contours, processed_image
 
 
-def plot_results(processed_image):
+def view_cell_image(processed_image):
     # Plot results
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 2)
     plt.imshow(processed_image, cmap="gray")
     plt.title("Detected cell Boundary")
     plt.axis("off")
-
     plt.tight_layout()
     plt.show()
 
-
-# for filename in os.listdir("./cell_images/"):
-#     print(filename)
-#     filter_image(f'./cell_images/{filename}')
-
-# filter_image(f'./cell_images/imgline.png')
 
 class Filter():
     def __init__(self, matrix: np.ndarray):
@@ -105,7 +103,7 @@ def _line_filter(size=10):
     return filter
 
 
-def detect_shapes_deprecated(image_matrix: np.ndarray, filter: Filter = Filter(_line_filter()), mode: str = "light", detection_threshold=0.2):
+def detect_shapes_canon(image_matrix: np.ndarray, filter: Filter = Filter(_line_filter()), mode: str = "light", detection_threshold=0.2):
     if mode == "light":
         image_matrix = 1 - image_matrix/255
     image_dim = image_matrix.shape
@@ -116,6 +114,7 @@ def detect_shapes_deprecated(image_matrix: np.ndarray, filter: Filter = Filter(_
             if filter.convolved(image_matrix[m*i: m*i+m, m*j: m*j+m], detection_threshold):
                 image_matrix[m*i: m*i+m, m*j: m*j+m] = 0.5
                 x = -1 + 2*j/(int(image_dim[1]/m)-1)
-                y =  1 - 2*i/(int(image_dim[0]/m)-1)
+                y = 1 - 2*i/(int(image_dim[0]/m)-1)
                 shape_points.append((x, y))
+    shape_points = shape_points - np.mean(shape_points, axis=0)
     return np.array(shape_points), image_matrix

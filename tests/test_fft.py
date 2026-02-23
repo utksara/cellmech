@@ -126,14 +126,14 @@ def test_convolution_2d():
 
     # Discrete convolution
     conv_d = convolution2_discrete(g, r, dx)
-    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+    if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         sns.heatmap(conv_d)
         plt.show()
     
     # Analytical convolution
     conv_a = convolution2_analytical(xx, yy, a, sigma)
     print("max conv_a, max conv_d ", np.max(conv_a), np.max(conv_d))
-    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+    if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         sns.heatmap(conv_a)
         plt.show()
     

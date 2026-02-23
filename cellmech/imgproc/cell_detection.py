@@ -2,33 +2,65 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
+# def smooth_contours(contour, window_size = 10):
+#     return smooth_contour_moving_average(contour, window_size)
 
-def smooth_contours(outer_contours):
-    smoothed_contours = []
+# def smooth_contours_polynomial(outer_contours, smooth_factor=0.005):
+#     """
+#     smooth_factor: fraction of contour perimeter (e.g. 0.001–0.02)
+#                    smaller = less smoothing
+#                    larger  = more smoothing
+#     """
+#     smoothed_contours = []
 
-    for c in outer_contours:
-        epsilon = 0.01 * cv2.arcLength(c, True)  # 1% of perimeter
-        c_smooth = cv2.approxPolyDP(c, epsilon, True)
-        smoothed_contours.append(c_smooth)
-    return smoothed_contours
+#     for c in outer_contours:
+#         epsilon = smooth_factor * cv2.arcLength(c, True)
+#         c_smooth = cv2.approxPolyDP(c, epsilon, True)
+#         smoothed_contours.append(c_smooth)
 
+#     return smoothed_contours
 
-def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.5):
+# def smooth_contour_moving_average(contour, window_size):
+#     """
+#     contour: Nx1x2 or Nx2 array
+#     window_size: number of neighboring points to average (odd number recommended)
+#     """
+#     print("contour " , contour)
+#     n = len(contour[0])
+#     contour = np.array(contour)
+#     # Ensure shape Nx2
+#     pts = contour.reshape(-1, 2)
 
-    # # Load image (grayscale)
-    # img = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
+#     # Make contour circular
+#     pad = window_size // 2
+#     pts_padded = np.vstack([pts[-pad:], pts, pts[:pad]])
 
-    # if img is None:
-    #     raise FileNotFoundError("Could not load image")
+#     kernel = np.ones(window_size) / window_size
 
+#     x_smooth = np.convolve(pts_padded[:, 0], kernel, mode='valid')
+#     y_smooth = np.convolve(pts_padded[:, 1], kernel, mode='valid')
+
+#     smoothed = np.stack([x_smooth, y_smooth], axis=1)
+    
+#     return list(smoothed.reshape(n, 2))
+
+def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
+
+    # Example improvements
+    blur = cv2.GaussianBlur(image_matrix, (5,5), 0)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    image_matrix = clahe.apply(blur)
     # 1. Improve contrast
+    
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     contrast = clahe.apply(image_matrix)
 
     # 2. Edge detection
+    # _, thresh = cv2.threshold(image_matrix, 0, 255,
+    #                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    upper_bound = 150
-    lower_bound = 150 * (1 + detection_threshold)
+    upper_bound = 100
+    lower_bound = upper_bound * (1 + detection_threshold)
     edges = cv2.Canny(contrast, upper_bound, lower_bound)
 
     # 3. Close gaps in edges (important!)

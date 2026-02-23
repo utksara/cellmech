@@ -1,0 +1,39 @@
+version: '3'
+
+vars:
+  ENABLE_VISUAL_TESTING: '{{.ENABLE_VISUAL_TESTING | default "0"}}'
+  NUM_WORKERS:
+    sh: |
+      CORES=$(nproc || echo 1)
+      TESTS=$(poetry run pytest --collect-only -q | grep -c "::" || echo 0)
+      if [ "$TESTS" -eq 0 ]; then
+        echo 1
+      elif [ "$TESTS" -lt "$CORES" ]; then
+        echo "$TESTS"
+      else
+        echo "$CORES"
+      fi
+
+tasks:
+  test_prepare:
+    desc: Set up environment for tests
+    cmds:
+      - echo "Preparing environment (ENABLE_VISUAL_TESTING={{.ENABLE_VISUAL_TESTING}})..."
+    env:
+      ENABLE_VISUAL_TESTING: '{{.ENABLE_VISUAL_TESTING}}'
+
+  test_run:
+    desc: Run all tests in parallel (workers = min(cores, tests))
+    deps: [test_prepare]
+    cmds:
+      - poetry run python3 -m pytest -s -n {{.NUM_WORKERS}}
+    env:
+      ENABLE_VISUAL_TESTING: '{{.ENABLE_VISUAL_TESTING}}'
+
+  run:
+    desc: Run a particular test by name in parallel
+    deps: [test_prepare]
+    cmds:
+      - poetry run python3 -m pytest -s -n {{.NUM_WORKERS}} -k {{.CLI_ARGS}}
+    env:
+      ENABLE_VISUAL_TESTING: '{{.ENABLE_VISUAL_TESTING}}'

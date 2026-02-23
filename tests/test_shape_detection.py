@@ -5,6 +5,8 @@ from PIL import Image
 from scipy.spatial import cKDTree
 import os
 
+HANDRAWN_TOLERENCE = 5e-2
+REALCELL_TOLERENCE = 1e-1
 
 def assert_same_curve(points_a, points_b, rel_tolerance=0.01):
     """
@@ -56,16 +58,28 @@ def assert_same_curve(points_a, points_b, rel_tolerance=0.01):
     assert current_rel_error <= rel_tolerance, \
         f"Relative error {current_rel_error:.4%} exceeds tolerance {rel_tolerance:.4%}"
 
-def test_shape_detection():
-
+def test_handrawn_boundaries():
     for image in ['img1', 'img2', 'img3', 'img4']:
         image_matrix = np.array(Image.open(
             f'images/cell_boundary/{image}.png').convert('L'))
         shape_points_1, _ = detect_shapes(image_matrix)
         shape_points_2, _ = detect_shapes_canon(image_matrix)
-        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=5e-2)
+        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=HANDRAWN_TOLERENCE)
+        if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
+            plt.plot(shape_points_1[:, 0], shape_points_1[:, 1])
+            plt.plot(shape_points_2[:, 0], shape_points_2[:, 1])
+            plt.show()
 
-        if os.environ.get("ENABLE_VISUAL_TESTING", False) :
+def test_real_cells():
+    for image in ['img1', 'img4', 'img5']:
+        image_matrix_origin = np.array(Image.open(
+            f'images/real_cells/{image}.png').convert('L'))
+        image_matrix_marked = np.array(Image.open(
+            f'images/real_cells/{image}_marked.png').convert('L'))
+        shape_points_1, _ = detect_shapes(image_matrix_origin)
+        shape_points_2, _ = detect_shapes_canon(image_matrix_marked)
+        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=REALCELL_TOLERENCE)
+        if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
             plt.plot(shape_points_1[:, 0], shape_points_1[:, 1])
             plt.plot(shape_points_2[:, 0], shape_points_2[:, 1])
             plt.show()

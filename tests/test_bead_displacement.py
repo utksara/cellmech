@@ -14,5 +14,5 @@ def test_beads_displacement():
         deformed_image, 10, min_corr = 0.04
     )
     Ux, Uy = displacement_field
-    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+    if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         plot_vector_field(np.stack([Ux, Uy], axis = 2))

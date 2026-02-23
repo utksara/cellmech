@@ -18,7 +18,7 @@ cellmechparams = CellMechParameters({
 
 
 def plot_vector_field_test(vecfield, title):
-    if os.environ.get("ENABLE_VISUAL_TESTING", False):
+    if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         plot_vector_field(vecfield, title)
 
 

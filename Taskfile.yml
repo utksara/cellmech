@@ -37,3 +37,9 @@ tasks:
       - poetry run python3 -m pytest -s -n {{.NUM_WORKERS}} -k {{.CLI_ARGS}}
     env:
       ENABLE_VISUAL_TESTING: '{{.ENABLE_VISUAL_TESTING}}'
+
+  test_ci:
+    desc: Run CI pipeline locally (Docker build and test)
+    cmds:
+      - docker build -t cellmech:latest .
+      - docker run --rm cellmech:latest poetry run python3 -m pytest -s

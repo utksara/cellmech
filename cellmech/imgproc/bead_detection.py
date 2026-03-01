@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.ndimage import shift as ndimage_shift, map_coordinates
 from typing import Tuple
+import cv2
 
 def generate_mock_beads_center(num_beads: int, max_range: int):
     # Generate random bead centers and radii
@@ -12,6 +13,18 @@ def generate_mock_beads_center(num_beads: int, max_range: int):
         centers.append((r_center, c_center))
     return centers
 
+def get_fidelity(img1, img2, bead1, bead2):
+    nx =  np.shape(img1)[0]
+    ny =  np.shape(img1)[1]
+    targt_sim1 = 1 - np.sum(abs(img1 - bead1))/(nx*ny)
+    cross_sim1 = 1 - np.sum(abs(img1 - bead2))/(nx*ny)
+    
+    baseline_sim = 1 - np.sum(abs(bead1 - bead2))/(nx*ny)
+    
+    print(" baseline_sim ", baseline_sim)
+    targt_sim2 = 1 - np.sum(abs(img2 - bead2))/(nx*ny)
+    cross_sim2 = 1 - np.sum(abs(img2 - bead1))/(nx*ny)
+    return targt_sim1 * (1 - cross_sim1) + targt_sim2 * (1 - cross_sim2)
 
 def generate_mock_bead_image(size: int, centers: np.ndarray, noise_level: float = 0.05, dUx: np.ndarray = np.zeros((1, 1)), dUy: np.ndarray = np.zeros((1, 1))) -> np.ndarray:
     """Generates a mock image with random beads, applying optional uniform displacement."""
@@ -93,8 +106,168 @@ def ssd_criterion(displacement: Tuple[float, float], ref_subset: np.ndarray, def
     ssd = np.sum((ref_subset - def_subset_interpolated)**2)
     return ssd
 
+def denoise_image(image: np.ndarray, strength: int = 10) -> np.ndarray:
+    """
+    Denoises an image using OpenCV's Fast Non-Local Means Denoising.
+    
+    Args:
+        image: np.ndarray (Grayscale or BGR).
+        strength: Parameter 'h' regulating filter strength. 
+                  Higher values remove more noise but blur details.
+    """
+    if image is None:
+        raise ValueError("Input image is empty or None.")
 
-def bead_image_correlation(
+    # Determine if the image is color or grayscale
+    is_color = len(image.shape) == 3 and image.shape[2] == 3
+
+    if is_color:
+        # For colored images: 
+        # h: filter strength, hColor: same for color components, 
+        # templateWindowSize: 7, searchWindowSize: 21
+        denoised = cv2.fastNlMeansDenoisingColored(image, None, strength, strength, 7, 21)
+    else:
+        # For grayscale images
+        denoised = cv2.fastNlMeansDenoising(image, None, strength, 7, 21)
+
+    return denoised
+
+def kmeans_numpy(data, k, max_iters=10, tolerance=1.0):
+    """
+    Pure NumPy implementation of K-Means clustering.
+    """
+    # 1. Initialize centroids randomly from the data points
+    n_samples = data.shape[0]
+    if n_samples < k:
+        return data # Not enough points to cluster
+        
+    random_indices = np.random.choice(n_samples, k, replace=False)
+    centroids = data[random_indices].astype(float)
+    
+    for _ in range(max_iters):
+        # 2. Compute distances from each point to each centroid
+        # Using broadcasting: (n_samples, 1, 2) - (1, k, 2) -> (n_samples, k, 2)
+        # Then squared Euclidean distance
+        distances = np.sum((data[:, np.newaxis, :] - centroids[np.newaxis, :, :])**2, axis=2)
+        
+        # 3. Assign points to the nearest centroid
+        labels = np.argmin(distances, axis=1)
+        
+        # 4. Update centroids
+        new_centroids = np.array([
+            data[labels == j].mean(axis=0) if np.any(labels == j) else centroids[j]
+            for j in range(k)
+        ])
+        
+        # 5. Check for convergence (if centroids move less than tolerance)
+        center_shift = np.sum(np.sqrt(np.sum((new_centroids - centroids)**2, axis=1)))
+        centroids = new_centroids
+        
+        if center_shift < tolerance:
+            break
+            
+    return centroids
+
+# function to convert raw bead image to well defined circular beads visible beads (grey sacle image with only binary pixel value)
+def convert_to_bead_array(image: np.ndarray, num_beads: int = 100, bead_radius: int = 2) -> np.ndarray:
+    """
+    Converts an image to a binary 2D array of uniform 'beads' using 
+    pure NumPy K-Means clustering.
+    
+    1 = Black (Bead), 0 = White (Background)
+    """
+    # Convert to grayscale if needed
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
+    
+    # Invert image: dark regions become high values (more likely to attract beads)
+    inv_gray = 255 - gray
+    h, w = inv_gray.shape
+    
+    # 1. Weighted Sampling: Get coordinates based on pixel darkness
+    # We create a coordinate grid and flatten it
+    y_coords, x_coords = np.indices((h, w))
+    coords = np.column_stack((y_coords.ravel(), x_coords.ravel()))
+    
+    # Use pixel intensities as weights for selection
+    weights = inv_gray.ravel().astype(float)
+    if weights.sum() == 0:
+        return np.zeros((h, w), dtype=np.uint8)
+    
+    weights /= weights.sum()
+    
+    # Sample points to run K-Means on (sampling 5x the beads for a better distribution)
+    sample_size = min(num_beads * 10, len(coords))
+    sampled_indices = np.random.choice(len(coords), size=sample_size, p=weights, replace=False)
+    sampled_coords = coords[sampled_indices]
+    
+    # 2. Run Pure NumPy K-Means
+    # This finds the 'centers of gravity' for the dark regions
+    centroids = kmeans_numpy(sampled_coords, num_beads)
+    
+    # 3. Create the Output 2D Array
+    binary_output = np.zeros((h, w), dtype=np.uint8)
+    
+    for center in centroids:
+        cy, cx = int(center[0]), int(center[1])
+        # Draw a circle for each bead (ensures nearly identical area for all clusters)
+        # Using cv2.circle is the most efficient way to modify the np.ndarray
+        cv2.circle(binary_output, (cx, cy), bead_radius, 1, -1)
+        
+    return binary_output
+
+def bead_image_correlation(ref_binary: np.ndarray, def_binary: np.ndarray, grid_res: int = 64) -> np.ndarray:
+    L = ref_binary.shape[0]
+    # 1. Extract Bead Centroids
+    def get_beads(arr):
+        _, _, _, centroids = cv2.connectedComponentsWithStats(arr.astype(np.uint8), connectivity=8)
+        return centroids[1:] 
+
+    pts_ref = get_beads(ref_binary) # Shape (M, 2)
+    pts_def = get_beads(def_binary) # Shape (K, 2)
+
+    if len(pts_ref) == 0 or len(pts_def) == 0:
+        return np.zeros((grid_res, grid_res, 2))
+
+    # 2. Nearest Neighbor Matching (Broadcasting)
+    # Finds the closest bead in 'def' for every bead in 'ref'
+    dist_matrix = np.sum((pts_ref[:, np.newaxis, :] - pts_def[np.newaxis, :, :])**2, axis=2)
+    closest_indices = np.argmin(dist_matrix, axis=1)
+    raw_displacements = pts_def[closest_indices] - pts_ref # Shape (M, 2)
+
+    # 3. Create the N x N Grid
+    grid_coords = np.linspace(0, L - 1, grid_res)
+    grid_x, grid_y = np.meshgrid(grid_coords, grid_coords)
+    grid_points = np.stack([grid_x.ravel(), grid_y.ravel()], axis=-1) # Shape (N*N, 2)
+
+    # 4. Inverse Distance Weighting (IDW) Interpolation
+    # We calculate the influence of each bead on each grid point
+    # To keep it efficient, we'll use the 8 nearest beads for each grid point
+    displacement_field = np.zeros((grid_res * grid_res, 2))
+    
+    # Distance from every grid point to every bead
+    # (N*N, M) distance matrix
+    dists = np.sqrt(np.sum((grid_points[:, np.newaxis, :] - pts_ref[np.newaxis, :, :])**2, axis=2))
+    
+    # Avoid division by zero
+    dists = np.maximum(dists, 1e-9)
+    weights = 1.0 / (dists**2) # Inverse Square Law
+    
+    # Weighted average of displacements
+    # (N*N, M) @ (M, 2) -> (N*N, 2)
+    weighted_sum = np.sum(weights[:, :, np.newaxis] * raw_displacements[np.newaxis, :, :], axis=1)
+    sum_of_weights = np.sum(weights, axis=1)[:, np.newaxis]
+    
+    displacement_field = weighted_sum / sum_of_weights
+
+    # Reshape to (N, N, 2)
+    # [..., 0] is dy (vertical), [..., 1] is dx (horizontal)
+    res = displacement_field.reshape(grid_res, grid_res, 2)
+    return res
+   
+def bead_image_correlation_deprecated(
     image1: np.ndarray,
     image2: np.ndarray,
     N: int,

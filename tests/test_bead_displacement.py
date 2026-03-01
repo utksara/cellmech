@@ -11,8 +11,9 @@ def test_beads_displacement():
 
     displacement_field = bead_image_correlation(
         reference_image, 
-        deformed_image, 10, min_corr = 0.04
+        deformed_image
     )
-    Ux, Uy = displacement_field
+    Ux = displacement_field[:,:,0]
+    Uy = displacement_field[:,:,1]
     if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         plot_vector_field(np.stack([Ux, Uy], axis = 2))

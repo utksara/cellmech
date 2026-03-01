@@ -43,3 +43,11 @@ tasks:
     cmds:
       - docker build -t cellmech:latest .
       - docker run --rm cellmech:latest poetry run python3 -m pytest -s
+
+  publish:
+    desc: Build and publish to PyPI
+    cmds:
+      - poetry version patch
+      - rm -rf dist/
+      - python3 -m build
+      - bash -lc "source ~/.bashrc && python3 -m twine upload --repository pypi dist/* -u __token__ -p \$PYPIKEY"

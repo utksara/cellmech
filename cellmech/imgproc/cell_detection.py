@@ -2,8 +2,8 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
-# def smooth_contours(contour, window_size = 10):
-#     return smooth_contour_moving_average(contour, window_size)
+def smooth_contours(contour):
+    return smooth_contour_moving_average(contour, window_size = int(len(contour)/20) )
 
 # def smooth_contours_polynomial(outer_contours, smooth_factor=0.005):
 #     """
@@ -20,38 +20,38 @@ import matplotlib.pyplot as plt
 
 #     return smoothed_contours
 
-# def smooth_contour_moving_average(contour, window_size):
-#     """
-#     contour: Nx1x2 or Nx2 array
-#     window_size: number of neighboring points to average (odd number recommended)
-#     """
-#     print("contour " , contour)
-#     n = len(contour[0])
-#     contour = np.array(contour)
-#     # Ensure shape Nx2
-#     pts = contour.reshape(-1, 2)
+def smooth_contour_moving_average(contour, window_size):
+    """
+    contour: Nx1x2 or Nx2 array
+    window_size: number of neighboring points to average (odd number recommended)
+    """
+    n = len(contour)
+    contour = np.array(contour)
+    # Ensure shape Nx2
+    pts = contour.reshape(-1, 2)
 
-#     # Make contour circular
-#     pad = window_size // 2
-#     pts_padded = np.vstack([pts[-pad:], pts, pts[:pad]])
+    # Make contour circular
+    pad = window_size // 2
+    pts_padded = np.vstack([pts[-pad:], pts, pts[:pad]])
 
-#     kernel = np.ones(window_size) / window_size
+    kernel = np.ones(window_size) / window_size
 
-#     x_smooth = np.convolve(pts_padded[:, 0], kernel, mode='valid')
-#     y_smooth = np.convolve(pts_padded[:, 1], kernel, mode='valid')
+    x_smooth = np.convolve(pts_padded[:, 0], kernel, mode='valid')
+    y_smooth = np.convolve(pts_padded[:, 1], kernel, mode='valid')
 
-#     smoothed = np.stack([x_smooth, y_smooth], axis=1)
-    
-#     return list(smoothed.reshape(n, 2))
+    smoothed = np.stack([x_smooth[:-1], y_smooth[:-1]], axis=1)
+
+    return smoothed.reshape(-1, 2)
+
 
 def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
 
     # Example improvements
-    blur = cv2.GaussianBlur(image_matrix, (5,5), 0)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    blur = cv2.GaussianBlur(image_matrix, (5, 5), 0)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     image_matrix = clahe.apply(blur)
     # 1. Improve contrast
-    
+
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     contrast = clahe.apply(image_matrix)
 
@@ -81,33 +81,31 @@ def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
     outer_contours = [
         c for c in contours if cv2.contourArea(c) > min_area
     ]
-
-    # 6. Draw only outer contours
-    processed_image = cv2.cvtColor(contrast, cv2.COLOR_GRAY2BGR)
-    # outer_contours = smooth_contours(outer_contours)
-    cv2.drawContours(processed_image, outer_contours, -1, (0, 255, 0), 2)
-
+    
     outer_contours = np.array(outer_contours[0])
     outer_contours = outer_contours.astype(float)
     m = outer_contours.shape[0]
     outer_contours = outer_contours.reshape(m, 2)
+    outer_contours = smooth_contours(outer_contours)
+    # 6. Draw only outer contours
+    processed_image = cv2.cvtColor(contrast, cv2.COLOR_GRAY2BGR)
+    formatted_contour = outer_contours.astype(np.int32).reshape((-1, 1, 2))
+    cv2.drawContours(processed_image, [formatted_contour], -1, (0, 255, 0), 2) 
 
     outer_contours[:, 0] = -1 + 2*outer_contours[:, 0]/(image_matrix.shape[1])
     outer_contours[:, 1] = -1 + 2*outer_contours[:, 1]/(image_matrix.shape[0])
     outer_contours = outer_contours - np.mean(outer_contours, axis=0)
 
-    return_contours = np.zeros((m, 2))
-    return_contours[:, 0] = outer_contours[:, 0]
-    return_contours[:, 1] = -outer_contours[:, 1]
-    return return_contours, processed_image
+    outer_contours[:, 1] = -outer_contours[:, 1]
+    return outer_contours, processed_image
 
 
-def view_cell_image(processed_image):
+def view_cell_image(processed_image, title = "viewed image"):
     # Plot results
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 2)
     plt.imshow(processed_image, cmap="gray")
-    plt.title("Detected cell Boundary")
+    plt.title(title)
     plt.axis("off")
     plt.tight_layout()
     plt.show()

@@ -5,21 +5,6 @@ import matplotlib.pyplot as plt
 def smooth_contours(contour):
     return smooth_contour_moving_average(contour, window_size = int(len(contour)/20) )
 
-# def smooth_contours_polynomial(outer_contours, smooth_factor=0.005):
-#     """
-#     smooth_factor: fraction of contour perimeter (e.g. 0.001–0.02)
-#                    smaller = less smoothing
-#                    larger  = more smoothing
-#     """
-#     smoothed_contours = []
-
-#     for c in outer_contours:
-#         epsilon = smooth_factor * cv2.arcLength(c, True)
-#         c_smooth = cv2.approxPolyDP(c, epsilon, True)
-#         smoothed_contours.append(c_smooth)
-
-#     return smoothed_contours
-
 def smooth_contour_moving_average(contour, window_size):
     """
     contour: Nx1x2 or Nx2 array
@@ -147,4 +132,19 @@ def detect_shapes_canon(image_matrix: np.ndarray, filter: Filter = Filter(_line_
                 y = 1 - 2*i/(int(image_dim[0]/m)-1)
                 shape_points.append((x, y))
     shape_points = shape_points - np.mean(shape_points, axis=0)
-    return np.array(shape_points), image_matrix
+    center = np.mean(shape_points, axis=0)
+    Dx = (shape_points - center)[:, 0]
+    Dy = (shape_points - center)[:, 1]
+    angles = np.arctan2(Dy,Dx)
+    n = shape_points.shape[0]
+    print("angles shape ", angles.shape)
+    stacked = np.zeros((n, 3))
+    stacked[:,0:2] = shape_points
+    stacked[:,2] = angles
+    sorted_indices = np.argsort(stacked[:, 2])
+    print("stacked shape ", stacked.shape)
+    stacked = stacked[sorted_indices]
+    print("stacked shape ", stacked.shape)
+    shape_points = smooth_contours(stacked[:,0:2])
+    print("shape_points shape ", shape_points.shape)
+    return shape_points, image_matrix

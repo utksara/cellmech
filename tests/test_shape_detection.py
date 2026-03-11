@@ -78,8 +78,9 @@ def test_real_cells():
             f'images/real_cells/{image}_marked.png').convert('L'))
         shape_points_1, _ = detect_shapes(image_matrix_origin)
         shape_points_2, _ = detect_shapes_canon(image_matrix_marked)
-        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=REALCELL_TOLERENCE)
         if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
-            plt.plot(shape_points_1[:, 0], shape_points_1[:, 1])
-            plt.plot(shape_points_2[:, 0], shape_points_2[:, 1])
+            plt.plot(shape_points_1[:, 0], shape_points_1[:, 1], label = "actual detection")
+            plt.plot(shape_points_2[:, 0], shape_points_2[:, 1], label = "expected detection")
+            plt.legend()
             plt.show()
+        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=REALCELL_TOLERENCE)

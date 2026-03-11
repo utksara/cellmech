@@ -213,7 +213,7 @@ def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-def calculate_tensile_strain_field(u_field, dx, sigma=0):
+def calculate_tensile_strain_field(u_field, cellmechparams, sigma=0):
     """
     Computes the maximum principal strain (tensile strain) field.
     
@@ -231,9 +231,11 @@ def calculate_tensile_strain_field(u_field, dx, sigma=0):
     eps_1 : (N, N) array
         Maximum principal strain field.
     """
+    params = cellmechparams.params
     ux = u_field[:, :, 0]
     uy = u_field[:, :, 1]
-
+    N = u_field.shape[0]
+    dx = params["width"]/N 
     # Optional smoothing to prevent gradient noise
     if sigma > 0:
         ux = gaussian_filter(ux, sigma=sigma)
@@ -355,8 +357,8 @@ def plot_vector_field(force_field: np.ndarray, title=None):
     x = np.linspace(-dim, dim, N)
     y = np.linspace(-dim, dim, N)
     X, Y = np.meshgrid(x, y, indexing='ij')
-    max_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:, :, 1]**2))
-    plt.quiver(X, Y, force_field[:, :, 0]/max_force, force_field[:, :, 1]/max_force, scale=20)
+    scaling_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:,     :, 1]**2))
+    plt.quiver(Y, X, force_field[:, :, 0]/scaling_force, force_field[:, :, 1]/scaling_force, angles='xy', scale_units='xy', scale=N)
     if title is not None:
         plt.title(title)
     plt.xlabel("X - axis")

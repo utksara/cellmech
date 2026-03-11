@@ -16,12 +16,10 @@ def get_point_position(bead_matrix):
 def unroll(bead_matrix, assumed_center):
     point_positions = get_point_position(bead_matrix)
     unrolled_matrix = np.zeros((len(point_positions), 2))
-    print(point_positions)
     for i in range(0, len(point_positions)):
         point = point_positions[i]
         distance = np.linalg.norm(point - assumed_center)
-        angle = np.arccos((point[1] - assumed_center[1])/distance)
-        print(angle * 180/np.pi, "deg", point)
+        angle = np.arccos((point[1] - assumed_center[1]) / distance)
         if (point[0] - assumed_center[0] < 0):
             angle = angle + np.pi
         unrolled_matrix[i, 0] = angle

@@ -102,7 +102,6 @@ def calculate_analytical_displacement(force_field,
     # Physical position of applied force
     x0 = force_position[0] * dx
     y0 = force_position[1] * dx
-    print("Analytical coefficient : ", F_mag * (1 + nu) / (2 * np.pi * E * dx))
     for i in range(N):
         for j in range(N):
 
@@ -143,16 +142,12 @@ def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparam
     U[i, j + 1, :] = custom_force(np.array([0, 1]))
     U[i, j - 1, :] = custom_force(np.array([0, -1]))
     U[i + 1, j, :] = custom_force(np.array([1, 0]))
-    print(f'central point of all forces {v_centr}')
     for point in force_points:
-        # dU = np.zeros((N, N, 2))
         v2 = np.array(point)
         # finding the position of the force points
         i = int((v2[0] + dim)*(N-1)/(2*dim))
         j = int((v2[1] + dim)*(N-1)/(2*dim))
-        # print(f'force calculated at point {v2} of value {custom_force(v_centr - v2)}')
         U[i, j, :] = custom_force(v_centr - v2)
-        # print(f'U force {U[i, j, :]}, point : {v2}')
     return U * scaling
 
 
@@ -368,13 +363,9 @@ def plot_vector_field(force_field: np.ndarray, title=None):
 
 def calculate_constrained_traction_force(displacement: np.ndarray, cellmechparams: CellMechParameters):
     traction_force = calculate_traction_force(displacement, cellmechparams)
-    for i in range(0, 2):
+    for _ in range(0, 2):
         recalc_displcemement = calculate_displacement(traction_force, cellmechparams)
-        recalc_traction_force = calculate_traction_force(recalc_displcemement, cellmechparams)
-        mae = np.mean(np.abs(traction_force - recalc_traction_force))/np.mean(abs(traction_force))
-        mme = np.mean(np.abs(traction_force - recalc_traction_force))/np.max(abs(traction_force))
-        print(f'mean avg error {mae}, max error {mme} in iter {i}')
-        traction_force = recalc_traction_force
+        traction_force = calculate_traction_force(recalc_displcemement, cellmechparams)
     return traction_force
 
 def calculate_traction_force(displacement: np.ndarray, cellmechparams: CellMechParameters):

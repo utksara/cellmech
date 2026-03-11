@@ -23,6 +23,5 @@ def test_interpolation():
     points = np.array([[0.25, 0.5], [0.5, 0.75], [0.75, 0.5], [0.5, 0.25]])
     values = np.array([[1, 0], [0,-0.5], [-0.5, 0], [0, 0.25]])
     displacement_field = interpolate_vector_field(points, values, N)
-    print(displacement_field.shape)
     if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         plot_vector_field(displacement_field)

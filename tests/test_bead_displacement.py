@@ -6,7 +6,7 @@ import os
 # Constants
 
 def test_beads_displacement():    
-    image_folder = "img3"
+    image_folder = "img4"
     reference_image = np.array(Image.open(f'images/beads/{image_folder}/before.png').convert('L'))
     deformed_image = np.array(Image.open(f'images/beads/{image_folder}/after.png').convert('L'))
 

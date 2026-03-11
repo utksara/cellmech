@@ -41,9 +41,6 @@ def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
     contrast = clahe.apply(image_matrix)
 
     # 2. Edge detection
-    # _, thresh = cv2.threshold(image_matrix, 0, 255,
-    #                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
     upper_bound = 100
     lower_bound = upper_bound * (1 + detection_threshold)
     edges = cv2.Canny(contrast, upper_bound, lower_bound)
@@ -135,16 +132,12 @@ def detect_shapes_canon(image_matrix: np.ndarray, filter: Filter = Filter(_line_
     center = np.mean(shape_points, axis=0)
     Dx = (shape_points - center)[:, 0]
     Dy = (shape_points - center)[:, 1]
-    angles = np.arctan2(Dy,Dx)
+    angles = np.arctan2(Dy, Dx)
     n = shape_points.shape[0]
-    print("angles shape ", angles.shape)
     stacked = np.zeros((n, 3))
-    stacked[:,0:2] = shape_points
-    stacked[:,2] = angles
+    stacked[:, 0:2] = shape_points
+    stacked[:, 2] = angles
     sorted_indices = np.argsort(stacked[:, 2])
-    print("stacked shape ", stacked.shape)
     stacked = stacked[sorted_indices]
-    print("stacked shape ", stacked.shape)
-    shape_points = smooth_contours(stacked[:,0:2])
-    print("shape_points shape ", shape_points.shape)
+    shape_points = smooth_contours(stacked[:, 0:2])
     return shape_points, image_matrix

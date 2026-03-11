@@ -11,5 +11,4 @@ def symmetric_gaussian(v: np.ndarray[int, int]):
 
 
 def simple_unit_force(v: np.ndarray[int, int]):
-    return v/(np.sqrt(v[0]**2 + v[1]**2))
-    # return np.array([v[1], -v[0]])/(np.sqrt(v[0]**2 + v[1]**2))
+    return v / (np.sqrt(v[0]**2 + v[1]**2))

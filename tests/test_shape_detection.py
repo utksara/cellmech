@@ -1,9 +1,11 @@
-from cellmech import detect_shapes, detect_shapes_canon
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
-import os
+
+from cellmech import detect_shapes, detect_shapes_canon
 
 HANDRAWN_TOLERENCE = 5e-2
 REALCELL_TOLERENCE = 1e-1

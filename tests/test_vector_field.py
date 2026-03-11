@@ -1,8 +1,9 @@
-from cellmech.imgproc.bead_detection import bead_image_correlation
-from cellmech import plot_vector_field
-import numpy as np
-from PIL import Image
 import os
+
+import numpy as np
+
+from cellmech import plot_vector_field
+
 # Constants
 
 def test_vector_map():

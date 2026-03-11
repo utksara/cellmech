@@ -1,10 +1,11 @@
-import numpy as np
-from scipy.ndimage import shift as ndimage_shift, map_coordinates
-from scipy.interpolate import LinearNDInterpolator
-from typing import Tuple
+from typing import Annotated, Literal
+
 import cv2
-import seaborn as sns
-import matplotlib.pyplot as plt
+import numpy as np
+import numpy.typing as npt
+from scipy import interpolate
+from scipy.ndimage import center_of_mass, label
+
 
 def generate_mock_beads_center(num_beads: int, max_range: int):
     # Generate random bead centers and radii
@@ -134,7 +135,7 @@ def convert_to_grayscale(image: np.ndarray) -> np.ndarray:
     gray[gray < np.mean(gray)] = 0
     return gray
 
-from scipy.ndimage import label, center_of_mass
+
 
 def find_bead_coordinates(grayscale_image: np.ndarray):
     """
@@ -231,10 +232,7 @@ def sort_beads(arr):
     # # 2. Force deterministic ordering by coordinates (Y then X)
     return arr[np.lexsort((arr[:, 0], arr[:, 1]))]
 
-from typing import Annotated, Literal
-import numpy.typing as npt
-from scipy import interpolate
-from numpy.random import rand
+
 
 # Define a type alias for an (N, 2) array of floats
 # The first dimension 'Any' represents N, and the second is explicitly 2

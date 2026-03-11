@@ -1,8 +1,11 @@
-import numpy as np
-from scipy.signal import convolve
-import seaborn as sns
-import matplotlib.pyplot as plt
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from scipy.signal import convolve
+from scipy.special import erf
+
 
 # definition of rectangular pulse function
 def rect_pulse(x, a):
@@ -18,7 +21,6 @@ def convolution_discrete(f, g, dx):
 
 # function 2 : return convolution function based on analytical formula between gaussian and rectangular pulse function
 def convolution_analytical(x, a, sigma):
-    from scipy.special import erf
     return (erf((x + a/2) / (np.sqrt(2) * sigma)) - erf((x - a/2) / (np.sqrt(2) * sigma))) / 2
 
 # function 3 : calculate fft of a given function based basen on their discrete values calculated over a unform grid
@@ -40,7 +42,6 @@ def gaussian_2d(x, y, sigma):
     return (1 / (2 * np.pi * sigma**2)) * np.exp(-(x**2 + y**2) / (2 * sigma**2))
 
 def convolution2_analytical(x, y, a, sigma):
-    from scipy.special import erf
     term_x = (erf((x + a/2) / (np.sqrt(2) * sigma)) - erf((x - a/2) / (np.sqrt(2) * sigma))) / 2
     term_y = (erf((y + a/2) / (np.sqrt(2) * sigma)) - erf((y - a/2) / (np.sqrt(2) * sigma))) / 2
     return term_x * term_y

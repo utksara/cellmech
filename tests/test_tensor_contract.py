@@ -1,6 +1,14 @@
-from cellmech import calculate_displacement, CellMechParameters, plot_vector_field, tensor_contraction, getG
-import numpy as np
 import os
+
+import numpy as np
+
+from cellmech import (
+    CellMechParameters,
+    calculate_displacement,
+    getG,
+    plot_vector_field,
+    tensor_contraction,
+)
 
 N = 20
 v = 0.5

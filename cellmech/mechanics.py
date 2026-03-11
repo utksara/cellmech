@@ -1,6 +1,8 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from cellmech.utils import symmetric_gaussian, simple_unit_force
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+from cellmech.utils import simple_unit_force
 
 
 def getG(v: np.ndarray[tuple[int]], params: dict):
@@ -205,8 +207,7 @@ def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
 
     return np.stack([Ux, Uy], axis=-1)
 
-import numpy as np
-from scipy.ndimage import gaussian_filter
+
 
 def calculate_tensile_strain_field(u_field, cellmechparams, sigma=0):
     """

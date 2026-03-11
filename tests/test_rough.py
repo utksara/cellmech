@@ -1,11 +1,11 @@
-from cellmech import plot_vector_field
-import numpy as np
 import os
-from scipy import interpolate
-from numpy.random import rand
-
 from typing import Annotated, Literal
+
+import numpy as np
 import numpy.typing as npt
+from scipy import interpolate
+
+from cellmech import plot_vector_field
 
 # Define a type alias for an (N, 2) array of floats
 # The first dimension 'Any' represents N, and the second is explicitly 2

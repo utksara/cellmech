@@ -519,7 +519,7 @@ def compute_stress_from_displacement(U, E, nu, dx, dz):
     
     return sigma_xz, sigma_yz
 
-def calculate_displacement_depth(depth, surface_traction, E, nu, m, dx):
+def calculate_displacement_depth(surface_traction : np.ndarray, depth :float, m : int, cellmechparams : CellMechParameters):
     """
     Compute displacement field inside elastic half-space from surface traction.
 
@@ -534,6 +534,9 @@ def calculate_displacement_depth(depth, surface_traction, E, nu, m, dx):
     - U: (N, N, m, 2)
     """
     
+    E = cellmechparams.params["N"]
+    nu = cellmechparams.params["p"]
+    dx = cellmechparams.params["dx"]
     N = surface_traction.shape[0]
     mu = E / (2 * (1 + nu))
     

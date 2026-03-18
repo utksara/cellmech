@@ -1,10 +1,8 @@
 import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
-
 from cellmech import detect_shapes, detect_shapes_canon
 
 HANDRAWN_TOLERENCE = 5e-2
@@ -64,13 +62,16 @@ def test_handrawn_boundaries():
     for image in ['img1', 'img2', 'img3', 'img4']:
         image_matrix = np.array(Image.open(
             f'images/cell_boundary/{image}.png').convert('L'))
-        shape_points_1, _ = detect_shapes(image_matrix)
+        shape_points_list, _ = detect_shapes(image_matrix)
+        shape_points_1 = shape_points_list[0] if isinstance(shape_points_list, list) and len(shape_points_list) > 0 else shape_points_list
         shape_points_2, _ = detect_shapes_canon(image_matrix)
-        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=HANDRAWN_TOLERENCE)
+        shape_points_1[:, 0] = shape_points_1[:, 0] - np.mean(shape_points_1[:, 0])
+        shape_points_1[:, 1] = shape_points_1[:, 1] - np.mean(shape_points_1[:, 1])
         if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
             plt.plot(shape_points_1[:, 0], shape_points_1[:, 1])
             plt.plot(shape_points_2[:, 0], shape_points_2[:, 1])
             plt.show()
+        assert_same_curve(shape_points_1, shape_points_2, rel_tolerance=HANDRAWN_TOLERENCE)
 
 def test_real_cells():
     for image in ['img1', 'img4', 'img5']:
@@ -78,7 +79,8 @@ def test_real_cells():
             f'images/real_cells/{image}.png').convert('L'))
         image_matrix_marked = np.array(Image.open(
             f'images/real_cells/{image}_marked.png').convert('L'))
-        shape_points_1, _ = detect_shapes(image_matrix_origin)
+        shape_points_list, _ = detect_shapes(image_matrix_origin)
+        shape_points_1 = shape_points_list[0] if isinstance(shape_points_list, list) and len(shape_points_list) > 0 else shape_points_list
         shape_points_2, _ = detect_shapes_canon(image_matrix_marked)
         if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
             plt.plot(shape_points_1[:, 0], shape_points_1[:, 1], label = "actual detection")

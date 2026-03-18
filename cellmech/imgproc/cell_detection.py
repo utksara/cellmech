@@ -30,6 +30,7 @@ def smooth_contour_moving_average(contour, window_size):
     return smoothed.reshape(-1, 2)
 
 
+# task : modify this function as specified
 def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
 
     # Example improvements
@@ -65,22 +66,29 @@ def detect_shapes(image_matrix: np.ndarray, detection_threshold=0.2):
         c for c in contours if cv2.contourArea(c) > min_area
     ]
     
-    outer_contours = np.array(outer_contours[0])
-    outer_contours = outer_contours.astype(float)
-    m = outer_contours.shape[0]
-    outer_contours = outer_contours.reshape(m, 2)
-    outer_contours = smooth_contours(outer_contours)
-    # 6. Draw only outer contours
+    # task 1 : make outer contorus of type list that returns all outer non concentric contours
+    processed_contours = []
+    for cnt in outer_contours:
+        pts = cnt.reshape(-1, 2).astype(float)
+        pts = smooth_contours(pts)
+        processed_contours.append(pts)
+    
+    # task 2 : iinstead of just one formatted_contour, draw all the outer non concentric contours
     processed_image = cv2.cvtColor(contrast, cv2.COLOR_GRAY2BGR)
-    formatted_contour = outer_contours.astype(np.int32).reshape((-1, 1, 2))
-    cv2.drawContours(processed_image, [formatted_contour], -1, (0, 255, 0), 2) 
+    for pts in processed_contours:
+        formatted_contour = pts.astype(np.int32).reshape((-1, 1, 2))
+        cv2.drawContours(processed_image, [formatted_contour], -1, (0, 255, 0), 2) 
 
-    outer_contours[:, 0] = -1 + 2*outer_contours[:, 0]/(image_matrix.shape[1])
-    outer_contours[:, 1] = -1 + 2*outer_contours[:, 1]/(image_matrix.shape[0])
-    outer_contours = outer_contours - np.mean(outer_contours, axis=0)
-
-    outer_contours[:, 1] = -outer_contours[:, 1]
-    return outer_contours, processed_image
+    final_contours = []
+    for pts in processed_contours:
+        norm_pts = pts.copy()
+        norm_pts[:, 0] = -1 + 2*norm_pts[:, 0]/(image_matrix.shape[1])
+        norm_pts[:, 1] = -1 + 2*norm_pts[:, 1]/(image_matrix.shape[0])
+        # norm_pts = norm_pts - np.mean(norm_pts, axis=0)
+        norm_pts[:, 1] = -norm_pts[:, 1]
+        final_contours.append(norm_pts)
+    
+    return final_contours, processed_image
 
 
 def view_cell_image(processed_image, title = "viewed image"):

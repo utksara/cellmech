@@ -128,29 +128,50 @@ def calculate_analytical_displacement(force_field,
 
     return u
 
-
-def calculate_dummy_force(force_points: list[tuple[float, float]], cellmechparams: CellMechParameters, custom_force: callable = simple_unit_force):
+# task :  modify  this function such that force_points can be a list of force_ponts representing each non concentric outer contour as the implementation in detect_cell
+def calculate_dummy_force(force_points: list, cellmechparams: CellMechParameters, custom_force: callable = simple_unit_force):
     params = cellmechparams.params
     scaling = 1e-6 # force in micro newtons
     N = params["N"]
     dx = params["width"]/N
     dim = params["width"]/2
-    X = np.linspace(-dim, dim, N)
     U = np.zeros((N, N, 2))
-    v_centr = np.mean(np.array(force_points), axis=0)
-    i = int((v_centr[0] + dim)*(N-1)/(2*dim))
-    j = int((v_centr[1] + dim)*(N-1)/(2*dim))
-    U[i - 1, j, :] = custom_force(np.array([-1, 0]))
-    U[i, j + 1, :] = custom_force(np.array([0, 1]))
-    U[i, j - 1, :] = custom_force(np.array([0, -1]))
-    U[i + 1, j, :] = custom_force(np.array([1, 0]))
-    for point in force_points:
-        v2 = np.array(point)
-        # finding the position of the force points
-        i = int((v2[0] + dim)*(N-1)/(2*dim))
-        j = int((v2[1] + dim)*(N-1)/(2*dim))
-        U[i, j, :] = custom_force(v_centr - v2)
-    return U * scaling
+
+    # Support for multiple contours
+    if isinstance(force_points, list) and len(force_points) > 0 and isinstance(force_points[0], np.ndarray):
+        contours = force_points
+    else:
+        contours = [np.array(force_points)]
+
+    # task 1: in case the force_points is of type list of force_points, add another loop which iterate through 
+    #         each outer contour in force_points
+    
+    force_location = np.zeros([N, N])
+    for contour in contours:
+        contour_arr = np.array(contour)
+        v_centr = np.mean(contour_arr, axis=0)
+        print(v_centr)
+        ic = int((v_centr[0] + 1)*(N-1)/2)
+        jc = int((v_centr[1] + 1)*(N-1)/2)
+        force_location[ic, jc] = 1
+        # Central forces (expansion/contraction) for this contour
+        if 0 < ic < N-1 and 0 < jc < N-1:
+            U[ic - 1, jc, :] += custom_force(np.array([-1, 0]))
+            U[ic, jc + 1, :] += custom_force(np.array([0, 1]))
+            U[ic, jc - 1, :] += custom_force(np.array([0, -1]))
+            U[ic + 1, jc, :] += custom_force(np.array([1, 0]))
+
+        for point in contour_arr:
+            v2 = np.array(point)
+            # finding the position of the force points
+            # print(v2)
+            i = int((v2[0] + 1)*(N-1)/2)
+            j = int((v2[1] + 1)*(N-1)/2)
+            force_location[i, j] = 1
+            if 0 <= i < N and 0 <= j < N:
+                U[i, j, :] = custom_force(v_centr - v2)
+                
+    return U * scaling, force_location
 
 
 def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
@@ -209,7 +230,7 @@ def fttc_force_to_displacement(F_field, E, nu, dx, pad_factor=2):
 
 
 
-def calculate_tensile_strain_field(u_field, cellmechparams, sigma=0):
+def calculate_tensile_force_magnitude(u_field, cellmechparams, sigma=0):
     """
     Computes the maximum principal strain (tensile strain) field.
     
@@ -346,15 +367,14 @@ def calculate_displacement(force_field: np.ndarray, cellmechparams: CellMechPara
 
 
 def plot_vector_field(force_field: np.ndarray, title=None):
-    # params = cellmechparams.params
-    # dim = params["width"]/2
     dim = 0.5
     N = force_field.shape[0]
     x = np.linspace(-dim, dim, N)
     y = np.linspace(-dim, dim, N)
     X, Y = np.meshgrid(x, y, indexing='ij')
-    scaling_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:,     :, 1]**2))
-    plt.quiver(Y, X, force_field[:, :, 0]/scaling_force, force_field[:, :, 1]/scaling_force, angles='xy', scale_units='xy', scale=N)
+    scaling_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:,  :, 1]**2))
+    plt.quiver(X, Y, force_field[:, :, 0]/scaling_force, 
+               force_field[:, :, 1]/scaling_force, angles='xy', scale_units='xy', scale=N)
     if title is not None:
         plt.title(title)
     plt.xlabel("X - axis")

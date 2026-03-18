@@ -17,3 +17,25 @@ def test_vector_map():
     # displacement_field[:, :, 1] = np.exp(-X**2/(2* sigm2)) * np.exp(-Y**2/(2* sigm2))
     if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
         plot_vector_field(displacement_field)
+
+        test_field = np.zeros((5,5,2))
+        test_field[:,:,0] = np.flip( np.array([
+            [0, 0,  0, 0, 0],
+            [0, 1, -0.5, 0, 0],
+            [0, 0,  0,   0, 0],
+            [0, 0,  0,   0, 0],
+            [0, 0,  0,   0, 0]
+            ]).T, axis = 1)
+
+        test_field[:,:,1] = np.flip( np.array([
+            [0, 0,     0,   0, 0],
+            [0, -0.1, -0.1, 0, 0],
+            [0,    1, -0.9, 0, 0],
+            [0,    0,  0,   0, 0],
+            [0,    0,  0,   0, 0]
+            ]).T, axis = 1)
+
+            
+        print(test_field[2,3,0])
+        print(test_field[2,2,1])
+        fig = plot_vector_field(test_field, "vector map of tensor displacement field")

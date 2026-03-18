@@ -3,7 +3,7 @@ import numpy as np
 import seaborn as sns
 from PIL import Image
 from cellmech import *
-
+import os
 
 def test_dummy():
 
@@ -27,18 +27,13 @@ def test_dummy():
     use generated dispclement field to retrieve original force field so see if calculations match 
     '''
 
-    force_points_list, updated_image = detect_shapes(image_matrix, detection_threshold = 0.7)
+    force_points_list, _ = detect_shapes(image_matrix, detection_threshold = 0.7)
 
-    x_axis = np.linspace(-1, 1, updated_image.shape[0])
-    y_axis = np.linspace(-1, 1, updated_image.shape[1])
-
-    print("len ", len(force_points_list))
-    # calculation of force field using gaussian
-    image_dims = image_matrix.shape
+    print("total cells deteceted ", len(force_points_list))
     force_field, force_location  = calculate_dummy_force(force_points_list, cellmechparams)
-    sns.heatmap(force_location)
-    fig = plot_vector_field(force_field, "vector map of force field")
-    
-    sns.heatmap(force_location)
-    plot_vector_field(force_field, "vector map of force field")
-    plt.show()
+    if int(os.environ.get("ENABLE_VISUAL_TESTING", False)):
+        sns.heatmap(force_location)
+        plot_vector_field(force_field, "vector map of force field")
+        sns.heatmap(force_location)
+        plot_vector_field(force_field, "vector map of force field")
+        plt.show()

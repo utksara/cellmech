@@ -240,15 +240,86 @@ Vector2DArray = Annotated[npt.NDArray[np.float64], Literal["N", 2]]
 
 def interpolate_vector_field(positions : Vector2DArray, values  : Vector2DArray, N : int = 100):
     xx, yy = np.meshgrid(np.linspace(0, 1, N), np.linspace(0, 1, N))
-    u_interp = interpolate.griddata(positions, values[:, 0], (xx, yy), method='cubic')
-    v_interp = interpolate.griddata(positions, values[:, 1], (xx, yy), method='cubic')
+    u_interp = interpolate.griddata(positions, values[:, 1], (xx, yy), method='cubic')
+    v_interp = interpolate.griddata(positions, values[:, 0], (xx, yy), method='cubic')
     return np.nan_to_num(np.stack([u_interp, v_interp], axis = -1), copy=False)
+
+from scipy.spatial import KDTree
+
+import numpy as np
+from scipy.spatial import KDTree
+
+def efficient_stable_map(points1, points2):
+    n1, n2 = len(points1), len(points2)
+    tree2 = KDTree(points2)
+    tree1 = KDTree(points1)
     
-def clustered_bead_image_correlation(ref_centroid: np.ndarray, def_centroid: np.ndarray, grid_res) -> np.ndarray:
-    pts_ref = sort_beads(ref_centroid)
-    pts_def = sort_beads(def_centroid)
-    pts_ref, pts_def = augment_zeros_to_array(pts_ref, pts_def)
-    raw_displacements = pts_def - pts_ref
+    # State tracking
+    p1_to_p2 = {}  # Final mapping: {index_p1: index_p2}
+    p2_to_p1 = {}  # Reverse mapping: {index_p2: index_p1}
+    
+    # Track how many neighbors we've checked for each point in points1
+    # We start by checking the 1st nearest neighbor (k=1)
+    p1_search_k = np.ones(n1, dtype=int)
+    unmatched_p1 = list(range(n1))
+
+    while unmatched_p1:
+        idx1 = unmatched_p1.pop(0)
+        
+        current_k = p1_search_k[idx1]
+        if current_k > n2:
+            continue # No more points left in points2 to check
+            
+        # Query the k-th nearest neighbor
+        # We query 'k' neighbors and take the last one to get the k-th best
+        distances, indices = tree2.query(points1[idx1], k=current_k)
+        
+        # If k > 1, query returns an array; if k == 1, it returns a scalar
+        idx2 = indices[-1] if current_k > 1 else indices
+
+        # Step 2: Check if idx1 is the 'best' (closest) for idx2
+        # This is the "Stable Marriage" condition you requested
+        _, best_p1_for_p2 = tree1.query(points2[idx2], k=1)
+        
+        if best_p1_for_p2 == idx1:
+            # It's a mutual match (or idx1 is the preferred suitor)
+            if idx2 in p2_to_p1:
+                # If idx2 was already matched to someone else, 
+                # that person is now unmatched and must look for their next neighbor
+                old_p1 = p2_to_p1[idx2]
+                unmatched_p1.append(old_p1)
+                p1_search_k[old_p1] += 1 
+            
+            p1_to_p2[idx1] = idx2
+            p2_to_p1[idx2] = idx1
+        else:
+            # idx2 prefers someone else. 
+            # idx1 must move to its next closest neighbor in the next iteration
+            p1_search_k[idx1] += 1
+            unmatched_p1.append(idx1)
+
+    return p1_to_p2
+
+    
+def maxmatch_difference(previous, after):
+    mapping = efficient_stable_map(previous, after)
+    p1_indices = list(mapping.keys())
+    p2_indices = [mapping[idx] for idx in p1_indices]
+    
+    # Use NumPy indexing to get the coordinate subsets
+    coords1 = previous[p1_indices]
+    coords2 = after[p2_indices]
+    
+    # Vectorized subtraction: Displacement = Destination - Source
+    displacements = coords2 - coords1
+    
+    return displacements, coords1
+
+def clustered_bead_image_correlation(centroid_before: np.ndarray, centroid_after: np.ndarray, grid_res) -> np.ndarray:
+    points_before = sort_beads(centroid_before)
+    points_after = sort_beads(centroid_after)
+    # points_before, points_after = augment_zeros_to_array(points_before, points_after)
+    raw_displacements, positions = maxmatch_difference(points_before, points_after)
     # 5. Linear Interpolation (Delaunay-based)
-    interp_vecfield = interpolate_vector_field(pts_ref, raw_displacements, grid_res)
+    interp_vecfield = interpolate_vector_field(positions, raw_displacements, grid_res)
     return interp_vecfield

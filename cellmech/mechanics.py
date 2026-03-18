@@ -59,7 +59,7 @@ def tensor_contraction(G_sub_matrix, force_field):
     return S
 
 class CellMechParameters():
-    required_params = ["pi", "E", "pi", "N", "width", "pixel_size"]
+    required_params = ["E", "pi", "N", "width", "pixel_size"]
 
     def __init__(self, params: dict):
         for key in self.required_params:
@@ -366,17 +366,27 @@ def calculate_displacement(force_field: np.ndarray, cellmechparams: CellMechPara
         return fttc_force_to_displacement(force_field, params["E"], params["p"], params["width"]/params["N"])
 
 
-def plot_vector_field(force_field: np.ndarray, title=None):
+def plot_vector_field(force_field: np.ndarray, title=None, custom_scale = None):
     dim = 0.5
     N = force_field.shape[0]
     x = np.linspace(-dim, dim, N)
     y = np.linspace(-dim, dim, N)
     X, Y = np.meshgrid(x, y, indexing='ij')
-    scaling_force = np.max(np.sqrt(force_field[:, :, 0]**2 + force_field[:,  :, 1]**2))
+    force_magn = np.sqrt(force_field[:, :, 0]**2 + force_field[:,  :, 1]**2)
+    max_force = np.max(force_magn)
+    min_force = np.min(force_magn)
+    if custom_scale is None:
+        scaling_force = max_force
+    else : scaling_force = custom_scale 
+
     plt.quiver(X, Y, force_field[:, :, 0]/scaling_force, 
-               force_field[:, :, 1]/scaling_force, angles='xy', scale_units='xy', scale=N)
+               force_field[:, :, 1]/scaling_force, angles='xy', scale_units='xy', scale=N * max_force/scaling_force)
+    
+    full_title = f"Max: {max_force:.2e}, Min: {min_force:.2e}"
     if title is not None:
-        plt.title(title)
+        full_title = f"{title}\n{full_title}"
+    
+    plt.title(full_title)
     plt.xlabel("X - axis")
     plt.ylabel("Y - axis")
     plt.show()
@@ -421,3 +431,181 @@ def calculate_traction_force_tensor(displacement: np.ndarray, cellmechparams: Ce
     # D = np.fft.ifft(D)
     # D = np.real(D)
     return D
+
+def calculate_traction_below(surface_traction : np.ndarray, depth :float, m : int, cellmechparams : CellMechParameters):
+    E = cellmechparams.params["N"]
+    nu = cellmechparams.params["p"]
+    return calculate_traction_euler(depth, surface_traction, E, nu, m)
+
+def calculate_traction_euler(depth, surface_traction, E, nu, m):
+    """
+    Compute shear stress (sigma_xz, sigma_yz) at different depths
+    from surface traction using elastic half-space theory.
+
+    Returns:
+    T_depth: (N, N, m, 2)
+    """
+    
+    N = surface_traction.shape[0]
+    dx = 1.0  # assume unit spacing unless you pass it explicitly
+    dz = depth / (m - 1)
+    
+    mu = E / (2 * (1 + nu))
+    
+    # Fourier frequencies
+    kx = 2 * np.pi * np.fft.fftfreq(N, d=dx)
+    ky = 2 * np.pi * np.fft.fftfreq(N, d=dx)
+    KX, KY = np.meshgrid(kx, ky, indexing='ij')
+    K = np.sqrt(KX**2 + KY**2)
+    K[0, 0] = 1e-9  # avoid division by zero
+    
+    # FFT of surface traction
+    Tx_hat = np.fft.fft2(surface_traction[:, :, 0])
+    Ty_hat = np.fft.fft2(surface_traction[:, :, 1])
+    
+    # Surface displacement (approximate kernel)
+    Ux0_hat = Tx_hat / (mu * K)
+    Uy0_hat = Ty_hat / (mu * K)
+    
+    # Depth grid
+    z_vals = np.linspace(0, depth, m)
+    
+    T_depth = np.zeros((N, N, m, 2))
+    
+    for i, z in enumerate(z_vals):
+        decay = np.exp(-K * z)
+        
+        # displacement at depth
+        Ux_hat = Ux0_hat * decay
+        Uy_hat = Uy0_hat * decay
+        
+        # derivative w.r.t z in Fourier space: d/dz = -K
+        dUx_dz_hat = -K * Ux_hat
+        dUy_dz_hat = -K * Uy_hat
+        
+        # shear stress: sigma_xz = mu * dux/dz
+        sigma_xz_hat = mu * dUx_dz_hat
+        sigma_yz_hat = mu * dUy_dz_hat
+        
+        # back to real space
+        T_depth[:, :, i, 0] = np.real(np.fft.ifft2(sigma_xz_hat))
+        T_depth[:, :, i, 1] = np.real(np.fft.ifft2(sigma_yz_hat))
+    
+    return T_depth
+
+def compute_stress_from_displacement(U, E, nu, dx, dz):
+    """
+    Compute stress tensor from displacement field U.
+
+    U shape: (N, N, m, 2)  # (ux, uy)
+    Returns: sigma_xz, sigma_yz (shear components vs depth)
+    """
+    
+    mu = E / (2 * (1 + nu))
+    lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+    
+    # Gradients
+    dux_dx = np.gradient(U[:, :, :, 0], dx, axis=0)
+    dux_dy = np.gradient(U[:, :, :, 0], dx, axis=1)
+    dux_dz = np.gradient(U[:, :, :, 0], dz, axis=2)
+    
+    duy_dx = np.gradient(U[:, :, :, 1], dx, axis=0)
+    duy_dy = np.gradient(U[:, :, :, 1], dx, axis=1)
+    duy_dz = np.gradient(U[:, :, :, 1], dz, axis=2)
+    
+    # Shear stresses (what you probably want)
+    sigma_xz = mu * dux_dz
+    sigma_yz = mu * duy_dz
+    
+    return sigma_xz, sigma_yz
+
+def calculate_displacement_depth(depth, surface_traction, E, nu, m, dx):
+    """
+    Compute displacement field inside elastic half-space from surface traction.
+
+    Parameters:
+    - depth: total depth
+    - surface_traction: (N, N, 2)
+    - E, nu: material properties
+    - m: number of depth slices
+    - dx: spatial resolution
+
+    Returns:
+    - U: (N, N, m, 2)
+    """
+    
+    N = surface_traction.shape[0]
+    mu = E / (2 * (1 + nu))
+    
+    # Fourier frequencies
+    kx = 2 * np.pi * np.fft.fftfreq(N, d=dx)
+    ky = 2 * np.pi * np.fft.fftfreq(N, d=dx)
+    KX, KY = np.meshgrid(kx, ky, indexing='ij')
+    K = np.sqrt(KX**2 + KY**2)
+    K[0,0] = 1e-9  # avoid division by zero
+
+    # FFT of traction
+    T_hat_x = np.fft.fft2(surface_traction[:, :, 0])
+    T_hat_y = np.fft.fft2(surface_traction[:, :, 1])
+
+    # --- Surface displacement from traction (simplified kernel) ---
+    # You can refine this kernel, but this is stable and physical
+    U0_hat_x = T_hat_x / (mu * K)
+    U0_hat_y = T_hat_y / (mu * K)
+
+    # Depth grid
+    z_vals = np.linspace(0, depth, m)
+
+    U = np.zeros((N, N, m, 2), dtype=np.float64)
+
+    for i, z in enumerate(z_vals):
+        decay = np.exp(-K * z)
+        
+        U_hat_x = U0_hat_x * decay
+        U_hat_y = U0_hat_y * decay
+        
+        U[:, :, i, 0] = np.real(np.fft.ifft2(U_hat_x))
+        U[:, :, i, 1] = np.real(np.fft.ifft2(U_hat_y))
+
+    return U
+
+def calculate_traction_rk4(depth, surface_traction, E, nu, m):
+    N = surface_traction.shape[0]
+    dz = depth / (m - 1)
+    mu = E / (2 * (1 + nu))
+    
+    # State contains [Displacement, Traction] -> Shape (N, N, 2, 2) per layer
+    # We store the result in the requested (N, N, m, 2) traction array
+    T_field = np.zeros((N, N, m, 2))
+    U_field = np.zeros((N, N, m, 2))
+    
+    T_field[:, :, 0, :] = surface_traction
+
+    def get_system_derivatives(U_slice, T_slice):
+        # du/dz = T / mu
+        du_dz = T_slice / mu
+        # dT/dz = -mu * laplacian(U)
+        dt_dz = np.zeros_like(T_slice)
+        for c in range(2):
+            dt_dz[:, :, c] = -mu * (np.gradient(np.gradient(U_slice[:, :, c], axis=0), axis=0) + 
+                                    np.gradient(np.gradient(U_slice[:, :, c], axis=1), axis=1))
+        return du_dz, dt_dz
+
+    for i in range(m - 1):
+        U_n = U_field[:, :, i, :]
+        T_n = T_field[:, :, i, :]
+        
+        # RK4 Steps for coupled system
+        du1, dt1 = get_system_derivatives(U_n, T_n)
+        du2, dt2 = get_system_derivatives(U_n + 0.5*dz*du1, T_n + 0.5*dz*dt1)
+        du3, dt3 = get_system_derivatives(U_n + 0.5*dz*du2, T_n + 0.5*dz*dt2)
+        du4, dt4 = get_system_derivatives(U_n + dz*du3, T_n + dz*dt3)
+        
+        U_field[:, :, i+1, :] = U_n + (dz/6) * (du1 + 2*du2 + 2*du3 + du4)
+        T_field[:, :, i+1, :] = T_n + (dz/6) * (dt1 + 2*dt2 + 2*dt3 + dt4)
+
+    # Shift to satisfy U(depth) = 0
+    U_bottom = U_field[:, :, -1, :][:, :, np.newaxis, :]
+    U_field -= U_bottom
+    
+    return T_field
